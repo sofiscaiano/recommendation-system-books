@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", type=Path, default=ROOT / "data.db")
     parser.add_argument("--ejemplo", type=Path, default=ROOT / "ejemplo.csv")
     parser.add_argument("--output", type=Path, default=ROOT / "submission.csv")
+    parser.add_argument(
+        "--eval-output",
+        type=Path,
+        default=ROOT / "eval_recs.csv",
+        help="Top-k del hold-out (id_lector, id_libro, score_pred, ranking). Ignorado con --skip-eval.",
+    )
     parser.add_argument("--k", type=int, default=defaults.k)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--skip-eval", action="store_true", help="Solo submission, sin hold-out interno.")
@@ -48,6 +54,7 @@ def run_eval(
     model: RatingModel,
     k: int,
     batch_size: int,
+    eval_output: Path,
 ) -> None:
     df_test_feat = features.transform(df_test)
     preds_rating = model.predict(df_test_feat)
@@ -67,6 +74,10 @@ def run_eval(
     )
     ndcg = ndcg_at_k(df_test, df_pred, k=k)
     print(f"Mean NDCG@{k}: {ndcg:.5f}")
+
+    cols = ["id_lector", "id_libro", "score_pred", "ranking"]
+    df_pred[cols].to_csv(eval_output, index=False)
+    print(f"Escrito {eval_output} ({df_pred['id_lector'].nunique()} lectores, {len(df_pred)} filas)")
 
 
 def run_submission(
@@ -122,7 +133,17 @@ def main() -> None:
 
     if not args.skip_eval:
         print("Evaluación interna...")
-        run_eval(df_train, df_test, lectores, libros, features, model, args.k, args.batch_size)
+        run_eval(
+            df_train,
+            df_test,
+            lectores,
+            libros,
+            features,
+            model,
+            args.k,
+            args.batch_size,
+            args.eval_output,
+        )
 
     print("Reentrenando con todas las interacciones...")
     features = FeatureBuilder().fit(df)

@@ -16,6 +16,7 @@ Recomendador de ranking (top-20 libros por `id_lector`). Contexto: [README.md](R
 - Diagnóstico del regresor: MSE y RMSE sobre ratings del hold-out.
 - Features de usuario/ítem solo con train en eval; split temporal leave-last-20.
 - Inferencia: `recommend_top_k` por lotes, sin filtro de géneros vistos. Candidatos: `Settings.only_interacted_items` (default True) descarta libros sin ninguna fila en `interacciones`; aplica a eval y submission.
+- Eval escribe el top-k en `eval_recs.csv` (`--eval-output`) para análisis; no corre con `--skip-eval`.
 
 ## Cómo cambiar el repo
 

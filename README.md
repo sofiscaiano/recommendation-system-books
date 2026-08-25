@@ -39,7 +39,7 @@ uv sync
 uv run python main.py
 ```
 
-Opciones: `--skip-eval`, `--k 20`, `--batch-size 8`, `--output submission.csv`.
+Opciones: `--skip-eval`, `--k 20`, `--batch-size 8`, `--output submission.csv`, `--eval-output eval_recs.csv` (top-k del hold-out, con `score_pred` y `ranking`).
 
 Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items` en [`src/quelibroleo/config.py`](src/quelibroleo/config.py)). Catálogo completo: `uv run python main.py --no-only-interacted-items`.
 
@@ -52,7 +52,7 @@ Hasta tener el protocolo oficial cerrado, el hold-out interno es:
 1. Ordenar interacciones por `id_lector` y `fecha`.
 2. Reservar las **últimas 20** interacciones de cada lector como test.
 3. Entrenar solo con el resto.
-4. Reportar MSE/RMSE del rating en el hold-out y NDCG@20 del top-20 (`sklearn.metrics.ndcg_score`).
+4. Reportar MSE/RMSE del rating en el hold-out y NDCG@20 del top-20 (`sklearn.metrics.ndcg_score`). El ranking de eval se escribe en [`eval_recs.csv`](eval_recs.csv) (mismo orden que la submission, más score).
 
 ## Alcance
 
