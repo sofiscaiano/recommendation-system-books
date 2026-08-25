@@ -1,0 +1,61 @@
+# --- Datos y bases de datos ---
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.sql
+
+# --- Archivos pesados / modelos / dumps ---
+*.pkl
+*.pickle
+*.joblib
+*.rds
+*.RData
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.onnx
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+
+# --- R ---
+.Rhistory
+.Rdata
+.Ruserdata
+.Rproj.user/
+
+# --- Jupyter Notebooks & Checkpoints ---
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# --- IDEs y editores ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Logs y temporales ---
+*.log
+logs/
+tmp/
+temp/
