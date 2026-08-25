@@ -15,9 +15,11 @@ Recomendador de ranking (top-20 libros por `id_lector`). Contexto: [README.md](R
 - Ranking: NDCG@20 con `sklearn.metrics.ndcg_score` (unión top-k ∪ test; no recomendados con score menor al mínimo predicho).
 - Diagnóstico del regresor: MSE y RMSE sobre ratings del hold-out.
 - Features de usuario/ítem solo con train en eval; split temporal leave-last-20.
-- Inferencia: `recommend_top_k` (catálogo completo menos vistos, por lotes). No duplicar loops ni filtrar por géneros vistos.
+- Inferencia: `recommend_top_k` por lotes, sin filtro de géneros vistos. Candidatos: `Settings.only_interacted_items` (default True) descarta libros sin ninguna fila en `interacciones`; aplica a eval y submission.
 
 ## Cómo cambiar el repo
 
-- Preferir ediciones mínimas en el paquete. No crear commits ni PRs salvo pedido.
-- Commits cortos, enfocados en el porqué.
+- Preferir ediciones mínimas en el paquete. No modificar `test_inicial.ipynb` salvo pedido.
+- Cuando el usuario **apruebe** un cambio (ok explícito, confirmación de plan, o pedido de implementar), **commitear** esos cambios en git al terminar, sin esperar un segundo "commit" salvo que pida no hacerlo.
+- No pushear a remoto salvo pedido.
+- Commits cortos, en español o inglés, enfocados en el porqué. No incluir `data.db`, secretos ni artefactos grandes.

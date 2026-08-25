@@ -9,6 +9,20 @@ from quelibroleo.features import FeatureBuilder
 from quelibroleo.model import RatingModel
 
 
+def candidate_books(
+    libros: pd.DataFrame,
+    interacciones: pd.DataFrame,
+    *,
+    only_interacted_items: bool,
+    item_col: str = "id_libro",
+) -> pd.DataFrame:
+    """Catálogo a rankear. Si ``only_interacted_items``, descarta libros sin ninguna interacción."""
+    if not only_interacted_items:
+        return libros
+    ids = interacciones[item_col].dropna().unique()
+    return libros[libros[item_col].isin(ids)].copy()
+
+
 def seen_items_by_user(
     df: pd.DataFrame,
     user_col: str = "id_lector",
@@ -27,7 +41,7 @@ def recommend_top_k(
     batch_size: int = 8,
     user_ids: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    """Top-k sobre el catálogo completo (menos ítems ya vistos), por lotes."""
+    """Top-k sobre candidatos (catálogo o solo ítems con interacción), menos ya vistos."""
     seen = seen or {}
     users = features.user_frame(usuarios)
     items = features.item_frame(libros)

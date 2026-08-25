@@ -5,24 +5,37 @@ from pathlib import Path
 
 import pandas as pd
 
+from quelibroleo.config import Settings
 from quelibroleo.data import load_catalog, load_interactions
 from quelibroleo.features import FeatureBuilder
 from quelibroleo.metrics import ndcg_at_k, rating_errors
 from quelibroleo.model import RatingModel
-from quelibroleo.recommend import fill_missing_with_ejemplo, recommend_top_k, seen_items_by_user
+from quelibroleo.recommend import (
+    candidate_books,
+    fill_missing_with_ejemplo,
+    recommend_top_k,
+    seen_items_by_user,
+)
 from quelibroleo.split import leave_last_k
 
 ROOT = Path(__file__).resolve().parent
 
 
 def parse_args() -> argparse.Namespace:
+    defaults = Settings()
     parser = argparse.ArgumentParser(description="Entrena, evalúa y genera submission Quelibroleo.")
     parser.add_argument("--db", type=Path, default=ROOT / "data.db")
     parser.add_argument("--ejemplo", type=Path, default=ROOT / "ejemplo.csv")
     parser.add_argument("--output", type=Path, default=ROOT / "submission.csv")
-    parser.add_argument("--k", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--k", type=int, default=defaults.k)
+    parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--skip-eval", action="store_true", help="Solo submission, sin hold-out interno.")
+    parser.add_argument(
+        "--only-interacted-items",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.only_interacted_items,
+        help="Si True, rankea solo libros con al menos una interacción. Desactivar con --no-only-interacted-items.",
+    )
     return parser.parse_args()
 
 
@@ -93,6 +106,12 @@ def main() -> None:
     print("Cargando datos...")
     df = load_interactions(args.db)
     libros, lectores = load_catalog(args.db)
+    n_catalogo = len(libros)
+    libros = candidate_books(libros, df, only_interacted_items=args.only_interacted_items)
+    print(
+        f"Libros candidatos: {len(libros)} / {n_catalogo} "
+        f"(only_interacted_items={args.only_interacted_items})"
+    )
 
     df_train, df_test = leave_last_k(df, k=args.k)
     print(f"Train: {df_train.shape}  Test: {df_test.shape}")

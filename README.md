@@ -41,6 +41,8 @@ uv run python main.py
 
 Opciones: `--skip-eval`, `--k 20`, `--batch-size 8`, `--output submission.csv`.
 
+Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items` en [`src/quelibroleo/config.py`](src/quelibroleo/config.py)). Catálogo completo: `uv run python main.py --no-only-interacted-items`.
+
 La pipeline está en [`src/quelibroleo/`](src/quelibroleo/) (`data`, `split`, `features`, `model`, `recommend`, `metrics`). [`test_inicial.ipynb`](test_inicial.ipynb) es exploración previa, no se usa para generar la entrega.
 
 ## Evaluación interna (propuesta)
