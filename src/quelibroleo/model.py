@@ -48,3 +48,17 @@ class RatingModel:
     def predict(self, df: pd.DataFrame) -> pd.Series:
         X = self._prepare(df, fit_categories=False)
         return pd.Series(self.estimator.predict(X), index=df.index)
+
+    def feature_importance(self) -> pd.DataFrame:
+        """Importancia LightGBM: ``gain`` (reducción de pérdida) y ``split`` (usos)."""
+        booster = self.estimator.booster_
+        table = pd.DataFrame(
+            {
+                "feature": self.feature_columns,
+                "gain": booster.feature_importance(importance_type="gain"),
+                "split": booster.feature_importance(importance_type="split"),
+            }
+        )
+        total_gain = float(table["gain"].sum())
+        table["gain_pct"] = 0.0 if total_gain == 0 else 100.0 * table["gain"] / total_gain
+        return table.sort_values("gain", ascending=False).reset_index(drop=True)

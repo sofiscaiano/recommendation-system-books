@@ -130,6 +130,9 @@ def main() -> None:
     features = FeatureBuilder().fit(df_train)
     print("Entrenando LightGBM (hold-out)...")
     model = RatingModel().fit(features.transform(df_train))
+    importance = model.feature_importance()
+    print("Feature importance (ordenada por gain):")
+    print(importance.to_string(index=False, formatters={"gain": "{:.1f}".format, "gain_pct": "{:.2f}%".format}))
 
     if not args.skip_eval:
         print("Evaluación interna...")
