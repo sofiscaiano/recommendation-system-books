@@ -39,7 +39,7 @@ uv sync
 uv run python main.py
 ```
 
-Opciones: `--skip-eval`, `--k 20`, `--batch-size 8`, `--output submission.csv`, `--eval-output eval_recs.csv` (top-k del hold-out, con `score_pred` y `ranking`).
+Opciones: `--skip-eval`, `--eval-user-frac 0.1` (muestra aleatoria de lectores en eval, p. ej. 10%), `--eval-seed 42`, `--k 20`, `--batch-size 8`, `--output submission.csv`, `--eval-output eval_recs.csv` (top-k del hold-out, con `score_pred` y `ranking`).
 
 Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items`) y, por lector, solo géneros u autores ya vistos (`filter_seen_genres` / `filter_seen_authors`; unión si ambos están activos). Flags en [`src/quelibroleo/config.py`](src/quelibroleo/config.py) y CLI: `--no-only-interacted-items`, `--no-filter-seen-genres`, `--no-filter-seen-authors`.
 

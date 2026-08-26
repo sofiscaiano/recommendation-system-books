@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from quelibroleo.config import Settings
@@ -35,6 +36,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--k", type=int, default=defaults.k)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
+    parser.add_argument(
+        "--eval-user-frac",
+        type=float,
+        default=defaults.eval_user_frac,
+        help="Fracción aleatoria de lectores del hold-out para eval (p. ej. 0.1 = 10%%). No afecta submission.",
+    )
+    parser.add_argument(
+        "--eval-seed",
+        type=int,
+        default=defaults.eval_seed,
+        help="Semilla del muestreo de lectores en eval.",
+    )
     parser.add_argument("--skip-eval", action="store_true", help="Solo submission, sin hold-out interno.")
     parser.add_argument(
         "--only-interacted-items",
@@ -57,6 +70,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _sample_eval_users(df_test: pd.DataFrame, frac: float, seed: int) -> pd.DataFrame:
+    if not 0.0 < frac <= 1.0:
+        raise ValueError(f"eval_user_frac debe estar en (0, 1], recibido {frac}")
+    users = df_test["id_lector"].drop_duplicates().to_numpy()
+    n_all = len(users)
+    if frac >= 1.0 or n_all == 0:
+        return df_test
+    n = max(1, int(round(n_all * frac)))
+    rng = np.random.default_rng(seed)
+    sampled = rng.choice(users, size=n, replace=False)
+    print(f"Eval sample: {n}/{n_all} lectores (frac={frac}, seed={seed})")
+    return df_test[df_test["id_lector"].isin(sampled)].copy()
+
+
 def run_eval(
     df_train: pd.DataFrame,
     df_test: pd.DataFrame,
@@ -69,7 +96,10 @@ def run_eval(
     eval_output: Path,
     filter_seen_genres: bool,
     filter_seen_authors: bool,
+    eval_user_frac: float,
+    eval_seed: int,
 ) -> None:
+    df_test = _sample_eval_users(df_test, eval_user_frac, eval_seed)
     df_test_feat = features.transform(df_test)
     preds_rating = model.predict(df_test_feat)
     mse, rmse = rating_errors(df_test_feat["rating"], preds_rating)
@@ -172,6 +202,8 @@ def main() -> None:
             args.eval_output,
             args.filter_seen_genres,
             args.filter_seen_authors,
+            args.eval_user_frac,
+            args.eval_seed,
         )
 
     print("Reentrenando con todas las interacciones...")
