@@ -1,6 +1,6 @@
 # Diccionario de variables del modelo
 
-El `LGBMRegressor` usa las **15 columnas** de `FEATURE_COLUMNS` (`src/quelibroleo/features.py`). El target es `rating`; los identificadores no entran al modelo.
+El `LGBMRegressor` usa las **13 columnas** de `FEATURE_COLUMNS` (`src/quelibroleo/features.py`). El target es `rating`; los identificadores no entran al modelo.
 
 ## Categóricas
 
@@ -22,14 +22,12 @@ LightGBM las trata como `category`. Los niveles se fijan en train.
 | `anio_edicion` | Año de edición del libro. |
 | `nacimiento` | Año de nacimiento del lector. |
 | `edad` | Año de referencia − `nacimiento`. En train/eval: año de `fecha`. En inferencia: último año de train (`ref_year`). |
-| `user_mean_rating` | Rating medio histórico del lector. Sin historial: media global de train. |
-| `user_count` | Número de interacciones del lector en train. Sin historial: `0`. |
-| `item_mean_rating` | Rating medio histórico del libro. Sin interacciones: media global de train. |
-| `item_count` | Número de interacciones del libro en train. Sin interacciones: `0`. |
-| `user_genero_mean` | Rating medio del lector en ese género literario. Si falta: media del género, luego media global. |
-| `user_autor_mean` | Rating medio del lector para ese autor. Si falta: media del autor, luego media global. |
+| `item_mean_rating` | Rating medio histórico del libro en train. Sin interacciones en train: ausente (`NaN`). |
+| `item_count` | Número de interacciones del libro en train. Sin interacciones en train: ausente (`NaN`). |
+| `user_genero_mean` | Rating medio **de ese lector** en ese género. Si el lector no lo leyó en train: ausente (`NaN`). |
+| `user_autor_mean` | Rating medio **de ese lector** para ese autor. Si el lector no lo leyó en train: ausente (`NaN`). |
 
-Las estadísticas de interacciones (`user_*`, `item_*`, afinidades) se calculan **solo con train**.
+Las estadísticas de interacciones (`item_*`, afinidades) se calculan **solo con train**. No se imputan con medias globales ni de género/autor.
 
 ## Fuera del modelo
 
@@ -41,5 +39,4 @@ Se usan al armar features o el ranking, pero no como inputs de LightGBM:
 | `titulo`, `isbn`, `resumen`, `img_src`, `nombre` | Catálogo / perfil; no se usan en el modelo. |
 | `vive_en` | Texto crudo; se parte en ciudad y país. |
 | `fecha` | Split temporal y cálculo de `edad` en train/eval. |
-| `genero_global_mean`, `autor_global_mean` | Solo imputación de afinidades; se descartan antes de entrenar. |
 | `rating` | Target del regresor. |

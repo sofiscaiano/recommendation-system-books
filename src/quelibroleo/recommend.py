@@ -31,6 +31,31 @@ def seen_items_by_user(
     return df.groupby(user_col, sort=False)[item_col].agg(set).to_dict()
 
 
+def _user_value_pairs(history: pd.DataFrame, col: str, user_col: str = "id_lector") -> pd.DataFrame:
+    return history[[user_col, col]].dropna().drop_duplicates()
+
+
+def filter_pairs_by_seen_affinity(
+    pairs: pd.DataFrame,
+    *,
+    seen_genero: pd.DataFrame | None,
+    seen_autor: pd.DataFrame | None,
+    user_col: str = "id_lector",
+) -> pd.DataFrame:
+    """Deja libros de géneros y/o autores ya vistos. Si ambos filtros están activos, es unión (OR)."""
+    if seen_genero is None and seen_autor is None:
+        return pairs
+
+    keep = np.zeros(len(pairs), dtype=bool)
+    if seen_genero is not None:
+        matched = pairs.merge(seen_genero.assign(_ok=1), on=[user_col, "genero"], how="left")["_ok"].eq(1)
+        keep |= matched.to_numpy()
+    if seen_autor is not None:
+        matched = pairs.merge(seen_autor.assign(_ok=1), on=[user_col, "autor"], how="left")["_ok"].eq(1)
+        keep |= matched.to_numpy()
+    return pairs.iloc[keep]
+
+
 def recommend_top_k(
     model: RatingModel,
     features: FeatureBuilder,
@@ -40,8 +65,11 @@ def recommend_top_k(
     k: int = 20,
     batch_size: int = 8,
     user_ids: Sequence[str] | None = None,
+    history: pd.DataFrame | None = None,
+    filter_seen_genres: bool = True,
+    filter_seen_authors: bool = True,
 ) -> pd.DataFrame:
-    """Top-k sobre candidatos (catálogo o solo ítems con interacción), menos ya vistos."""
+    """Top-k sobre candidatos, menos ya vistos. Filtros de género/autor usan ``history``."""
     seen = seen or {}
     users = features.user_frame(usuarios)
     items = features.item_frame(libros)
@@ -49,6 +77,10 @@ def recommend_top_k(
         users = users[users["id_lector"].isin(user_ids)]
     users = users.reset_index(drop=True)
     items = items.reset_index(drop=True)
+
+    hist = history if history is not None else pd.DataFrame(columns=["id_lector", "genero", "autor"])
+    seen_genero = _user_value_pairs(hist, "genero") if filter_seen_genres else None
+    seen_autor = _user_value_pairs(hist, "autor") if filter_seen_authors else None
 
     bloques: list[pd.DataFrame] = []
     n_users_total = len(users)
@@ -72,6 +104,12 @@ def recommend_top_k(
                 visto["_seen"] = 1
                 pairs = pairs.merge(visto, on=["id_lector", "id_libro"], how="left")
                 pairs = pairs[pairs["_seen"].isna()].drop(columns="_seen")
+
+        pairs = filter_pairs_by_seen_affinity(
+            pairs,
+            seen_genero=seen_genero,
+            seen_autor=seen_autor,
+        )
 
         if pairs.empty:
             continue

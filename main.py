@@ -42,6 +42,18 @@ def parse_args() -> argparse.Namespace:
         default=defaults.only_interacted_items,
         help="Si True, rankea solo libros con al menos una interacción. Desactivar con --no-only-interacted-items.",
     )
+    parser.add_argument(
+        "--filter-seen-genres",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.filter_seen_genres,
+        help="Si True, solo recomienda géneros que el lector ya interactuó. Desactivar con --no-filter-seen-genres.",
+    )
+    parser.add_argument(
+        "--filter-seen-authors",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.filter_seen_authors,
+        help="Si True, solo recomienda autores que el lector ya interactuó. Desactivar con --no-filter-seen-authors.",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +67,8 @@ def run_eval(
     k: int,
     batch_size: int,
     eval_output: Path,
+    filter_seen_genres: bool,
+    filter_seen_authors: bool,
 ) -> None:
     df_test_feat = features.transform(df_test)
     preds_rating = model.predict(df_test_feat)
@@ -71,6 +85,9 @@ def run_eval(
         k=k,
         batch_size=batch_size,
         user_ids=eval_users,
+        history=df_train,
+        filter_seen_genres=filter_seen_genres,
+        filter_seen_authors=filter_seen_authors,
     )
     ndcg = ndcg_at_k(df_test, df_pred, k=k)
     print(f"Mean NDCG@{k}: {ndcg:.5f}")
@@ -90,6 +107,8 @@ def run_submission(
     output_path: Path,
     k: int,
     batch_size: int,
+    filter_seen_genres: bool,
+    filter_seen_authors: bool,
 ) -> None:
     ejemplo = pd.read_csv(ejemplo_path)
     user_ids = ejemplo["id_lector"].drop_duplicates().tolist()
@@ -106,6 +125,9 @@ def run_submission(
         k=k,
         batch_size=batch_size,
         user_ids=con_historial,
+        history=df_all,
+        filter_seen_genres=filter_seen_genres,
+        filter_seen_authors=filter_seen_authors,
     )
     df_final = fill_missing_with_ejemplo(df_pred, ejemplo, user_ids, k=k)
     df_final[["id_lector", "id_libro"]].to_csv(output_path, index=False)
@@ -121,7 +143,9 @@ def main() -> None:
     libros = candidate_books(libros, df, only_interacted_items=args.only_interacted_items)
     print(
         f"Libros candidatos: {len(libros)} / {n_catalogo} "
-        f"(only_interacted_items={args.only_interacted_items})"
+        f"(only_interacted_items={args.only_interacted_items}, "
+        f"filter_seen_genres={args.filter_seen_genres}, "
+        f"filter_seen_authors={args.filter_seen_authors})"
     )
 
     df_train, df_test = leave_last_k(df, k=args.k)
@@ -146,6 +170,8 @@ def main() -> None:
             args.k,
             args.batch_size,
             args.eval_output,
+            args.filter_seen_genres,
+            args.filter_seen_authors,
         )
 
     print("Reentrenando con todas las interacciones...")
@@ -154,7 +180,17 @@ def main() -> None:
 
     print("Generando submission...")
     run_submission(
-        df, lectores, libros, features, model, args.ejemplo, args.output, args.k, args.batch_size
+        df,
+        lectores,
+        libros,
+        features,
+        model,
+        args.ejemplo,
+        args.output,
+        args.k,
+        args.batch_size,
+        args.filter_seen_genres,
+        args.filter_seen_authors,
     )
 
 

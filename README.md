@@ -41,7 +41,7 @@ uv run python main.py
 
 Opciones: `--skip-eval`, `--k 20`, `--batch-size 8`, `--output submission.csv`, `--eval-output eval_recs.csv` (top-k del hold-out, con `score_pred` y `ranking`).
 
-Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items` en [`src/quelibroleo/config.py`](src/quelibroleo/config.py)). Catálogo completo: `uv run python main.py --no-only-interacted-items`.
+Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items`) y, por lector, solo géneros u autores ya vistos (`filter_seen_genres` / `filter_seen_authors`; unión si ambos están activos). Flags en [`src/quelibroleo/config.py`](src/quelibroleo/config.py) y CLI: `--no-only-interacted-items`, `--no-filter-seen-genres`, `--no-filter-seen-authors`.
 
 La pipeline está en [`src/quelibroleo/`](src/quelibroleo/) (`data`, `split`, `features`, `model`, `recommend`, `metrics`). [`test_inicial.ipynb`](test_inicial.ipynb) es exploración previa, no se usa para generar la entrega.
 
