@@ -28,10 +28,12 @@ def seen_items_by_user(
     user_col: str = "id_lector",
     item_col: str = "id_libro",
 ) -> dict[str, set]:
+    """Mapea cada lector al conjunto de libros con los que ya interactuó."""
     return df.groupby(user_col, sort=False)[item_col].agg(set).to_dict()
 
 
 def _user_value_pairs(history: pd.DataFrame, col: str, user_col: str = "id_lector") -> pd.DataFrame:
+    """Pares únicos lector-valor (género o autor) presentes en el historial."""
     return history[[user_col, col]].dropna().drop_duplicates()
 
 
@@ -139,6 +141,7 @@ def fill_missing_with_ejemplo(
     user_ids: Sequence[str],
     k: int = 20,
 ) -> pd.DataFrame:
+    """Completa lectores sin ranking propio con las filas de ``ejemplo.csv``."""
     procesados = set(df_pred["id_lector"].unique()) if not df_pred.empty else set()
     faltantes = [u for u in user_ids if u not in procesados]
     if not faltantes:

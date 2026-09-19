@@ -20,13 +20,17 @@ DEFAULT_LGBM_PARAMS = {
 
 
 class RatingModel:
+    """Regresor LightGBM de rating sobre las columnas de ``FEATURE_COLUMNS``."""
+
     def __init__(self, **lgbm_params) -> None:
+        """Crea el estimador; ``lgbm_params`` pisa ``DEFAULT_LGBM_PARAMS``."""
         params = {**DEFAULT_LGBM_PARAMS, **lgbm_params}
         self.estimator = LGBMRegressor(**params)
         self.category_maps: dict[str, pd.Index] = {}
         self.feature_columns: list[str] = list(FEATURE_COLUMNS)
 
     def _prepare(self, df: pd.DataFrame, *, fit_categories: bool) -> pd.DataFrame:
+        """Convierte numéricos y categorías; en fit guarda el mapa de niveles."""
         X = df[self.feature_columns].copy()
         for col in NUMERIC_FEATURES:
             X[col] = pd.to_numeric(X[col], errors="coerce")
@@ -41,11 +45,13 @@ class RatingModel:
         return X
 
     def fit(self, df: pd.DataFrame, target_col: str = "rating") -> RatingModel:
+        """Entrena el regresor sobre ``df`` usando ``target_col`` como etiqueta."""
         X = self._prepare(df, fit_categories=True)
         self.estimator.fit(X, df[target_col])
         return self
 
     def predict(self, df: pd.DataFrame) -> pd.Series:
+        """Predice ratings alineados al índice de ``df``."""
         X = self._prepare(df, fit_categories=False)
         return pd.Series(self.estimator.predict(X), index=df.index)
 

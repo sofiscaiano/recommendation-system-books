@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 def parse_args() -> argparse.Namespace:
+    """Parsea flags CLI y rellena defaults desde ``Settings``."""
     defaults = Settings()
     parser = argparse.ArgumentParser(description="Entrena, evalúa y genera submission Quelibroleo.")
     parser.add_argument("--db", type=Path, default=ROOT / "data.db")
@@ -71,6 +72,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _sample_eval_users(df_test: pd.DataFrame, frac: float, seed: int) -> pd.DataFrame:
+    """Submuestrea lectores del hold-out; ``frac=1`` deja el test intacto."""
     if not 0.0 < frac <= 1.0:
         raise ValueError(f"eval_user_frac debe estar en (0, 1], recibido {frac}")
     users = df_test["id_lector"].drop_duplicates().to_numpy()
@@ -99,6 +101,7 @@ def run_eval(
     eval_user_frac: float,
     eval_seed: int,
 ) -> None:
+    """Evalúa MSE/RMSE y NDCG@k en el hold-out y escribe ``eval_output``."""
     df_test = _sample_eval_users(df_test, eval_user_frac, eval_seed)
     df_test_feat = features.transform(df_test)
     preds_rating = model.predict(df_test_feat)
@@ -140,6 +143,7 @@ def run_submission(
     filter_seen_genres: bool,
     filter_seen_authors: bool,
 ) -> None:
+    """Genera el CSV de entrega: top-k por lector, con fallback a ``ejemplo.csv``."""
     ejemplo = pd.read_csv(ejemplo_path)
     user_ids = ejemplo["id_lector"].drop_duplicates().tolist()
     historial = set(df_all["id_lector"].unique())
@@ -165,6 +169,7 @@ def run_submission(
 
 
 def main() -> None:
+    """Entrena, evalúa (salvo ``--skip-eval``) y escribe la submission."""
     args = parse_args()
     print("Cargando datos...")
     df = load_interactions(args.db)

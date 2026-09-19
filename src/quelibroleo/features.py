@@ -28,12 +28,14 @@ class FeatureBuilder:
     """Estadísticas de usuario/ítem calculadas solo en train. Sin imputación global."""
 
     def __init__(self) -> None:
+        """Inicializa estadísticas vacías; ``fit`` las completa con train."""
         self.ref_year: int = 2020
         self.item_stats: pd.DataFrame = pd.DataFrame()
         self.user_genero: pd.DataFrame = pd.DataFrame()
         self.user_autor: pd.DataFrame = pd.DataFrame()
 
     def fit(self, df_train: pd.DataFrame) -> FeatureBuilder:
+        """Aprende stats de ítem y afinidad usuario-género/autor solo en train."""
         self.ref_year = int(df_train["fecha"].dt.year.max())
 
         self.item_stats = (
@@ -57,6 +59,7 @@ class FeatureBuilder:
         date_col: str = "fecha",
         ref_year: int | None = None,
     ) -> pd.DataFrame:
+        """Adjunta stats de train y calcula ``edad`` (año de ``fecha`` o ``ref_year``)."""
         res = df.merge(self.item_stats, on="id_libro", how="left")
         res = res.merge(self.user_genero, on=["id_lector", "genero"], how="left")
         res = res.merge(self.user_autor, on=["id_lector", "autor"], how="left")
@@ -72,14 +75,17 @@ class FeatureBuilder:
         return res
 
     def user_frame(self, lectores: pd.DataFrame) -> pd.DataFrame:
+        """Perfil de lector para el producto cartesiano de ranking."""
         cols = [c for c in ["id_lector", "sexo", "nacimiento", "vive_en_ciudad", "vive_en_pais"] if c in lectores.columns]
         return lectores[cols].drop_duplicates("id_lector")
 
     def item_frame(self, libros: pd.DataFrame) -> pd.DataFrame:
+        """Catálogo de libros con stats de ítem aprendidas en train."""
         cols = [c for c in ["id_libro", "autor", "genero", "editorial", "anio_edicion"] if c in libros.columns]
         items = libros[cols].drop_duplicates("id_libro")
         return items.merge(self.item_stats, on="id_libro", how="left")
 
     def attach_affinities(self, pairs: pd.DataFrame) -> pd.DataFrame:
+        """Pega medias de rating usuario-género y usuario-autor a pares lector-libro."""
         res = pairs.merge(self.user_genero, on=["id_lector", "genero"], how="left")
         return res.merge(self.user_autor, on=["id_lector", "autor"], how="left")

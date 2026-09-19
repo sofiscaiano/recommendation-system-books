@@ -55,6 +55,7 @@ FROM lectores
 
 
 def format_data(data: pd.DataFrame, inplace: bool = False) -> pd.DataFrame:
+    """Parsea ``fecha`` y convierte ``nacimiento`` / ``anio_edicion`` a entero nullable."""
     res = data if inplace else data.copy()
     if "fecha" in res.columns:
         res["fecha"] = pd.to_datetime(res["fecha"], format="%d-%m-%Y", errors="coerce")
@@ -72,6 +73,7 @@ def extraer_ciudad_pais(
     col_pais: str = "vive_en_pais",
     inplace: bool = False,
 ) -> pd.DataFrame:
+    """Separa ``vive_en`` en ciudad y país usando el primer ``-`` como corte."""
     res = df if inplace else df.copy()
 
     if res.empty or col_origen not in res.columns:
@@ -93,17 +95,20 @@ def extraer_ciudad_pais(
 
 
 def _read_sql(db_path: str | Path, query: str) -> pd.DataFrame:
+    """Ejecuta ``query`` contra SQLite y devuelve un DataFrame."""
     with sqlite3.connect(db_path) as conexion:
         return pd.read_sql_query(query, conexion)
 
 
 def load_interactions(db_path: str | Path) -> pd.DataFrame:
+    """Carga interacciones joinadas con libro y lector, ya formateadas."""
     df = _read_sql(db_path, INTERACTIONS_QUERY)
     df = format_data(df)
     return extraer_ciudad_pais(df)
 
 
 def load_catalog(db_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Devuelve ``(libros, lectores)`` del catálogo, con tipos y ``vive_en`` parseados."""
     libros = format_data(_read_sql(db_path, LIBROS_QUERY))
     lectores = format_data(_read_sql(db_path, LECTORES_QUERY))
     lectores = extraer_ciudad_pais(lectores)
