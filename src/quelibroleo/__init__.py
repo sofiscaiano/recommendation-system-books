@@ -1,24 +1,16 @@
-"""Pipeline de recomendación Quelibroleo."""
+"""Recomendador de libros en dos etapas."""
 
-from quelibroleo.config import Settings
-from quelibroleo.data import extraer_ciudad_pais, format_data, load_catalog, load_interactions
-from quelibroleo.features import FeatureBuilder
-from quelibroleo.metrics import ndcg_at_k, rating_errors
-from quelibroleo.model import RatingModel
-from quelibroleo.recommend import candidate_books, recommend_top_k
-from quelibroleo.split import leave_last_k
+from .config import PipelineConfig
+from .data import DataQualityReport, DatasetBundle, load_dataset
+from .splits import RollingFold, TemporalSplit, leave_last_k, rolling_origin_folds
 
 __all__ = [
-    "FeatureBuilder",
-    "RatingModel",
-    "Settings",
-    "candidate_books",
-    "extraer_ciudad_pais",
-    "format_data",
+    "DataQualityReport",
+    "DatasetBundle",
+    "PipelineConfig",
+    "RollingFold",
+    "TemporalSplit",
     "leave_last_k",
-    "load_catalog",
-    "load_interactions",
-    "ndcg_at_k",
-    "rating_errors",
-    "recommend_top_k",
+    "load_dataset",
+    "rolling_origin_folds",
 ]

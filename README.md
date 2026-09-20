@@ -16,7 +16,7 @@ Tres tablas en `data.db` (SQLite):
 | --- | --- | --- |
 | `lectores` | `id_lector` | Perfil: nombre, género/sexo, `vive_en`, año de nacimiento |
 | `libros` | `id_libro` | Catálogo: título, autor, género, editorial, año de edición, ISBN, resumen, imagen |
-| `interacciones` | `id_lector` + `id_libro` + `fecha` | Historial: fecha y `rating` |
+| `interacciones` | `id_lector` + `id_libro` | Historial: fecha y `rating` |
 
 ## Entrega
 
@@ -36,24 +36,50 @@ Python ≥ 3.13, dependencias con [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
-uv run python main.py
+uv run python main.py evaluate
+uv run python main.py submit
 ```
 
-Opciones: `--skip-eval`, `--eval-user-frac 0.1` (muestra aleatoria de lectores en eval, p. ej. 10%), `--eval-seed 42`, `--k 20`, `--batch-size 8`, `--output submission.csv`, `--eval-output eval_recs.csv` (top-k del hold-out, con `score_pred` y `ranking`).
+La búsqueda completa de hiperparámetros es opcional y considerablemente más
+costosa:
 
-Candidatos: por defecto solo libros con al menos una interacción (`Settings.only_interacted_items`) y, por lector, solo géneros u autores ya vistos (`filter_seen_genres` / `filter_seen_authors`; unión si ambos están activos). Flags en [`src/quelibroleo/config.py`](src/quelibroleo/config.py) y CLI: `--no-only-interacted-items`, `--no-filter-seen-genres`, `--no-filter-seen-authors`.
+```bash
+uv run python main.py evaluate --tune
+```
 
-La pipeline está en [`src/quelibroleo/`](src/quelibroleo/) (`data`, `split`, `features`, `model`, `recommend`, `metrics`). [`test_inicial.ipynb`](test_inicial.ipynb) es exploración previa, no se usa para generar la entrega.
-
-## Evaluación interna (propuesta)
+## Evaluación interna
 
 Hasta tener el protocolo oficial cerrado, el hold-out interno es:
 
 1. Ordenar interacciones por `id_lector` y `fecha`.
 2. Reservar las **últimas 20** interacciones de cada lector como test.
 3. Entrenar solo con el resto.
-4. Reportar MSE/RMSE del rating en el hold-out y NDCG@20 del top-20 (`sklearn.metrics.ndcg_score`). El ranking de eval se escribe en [`eval_recs.csv`](eval_recs.csv) (mismo orden que la submission, más score).
 
-## Alcance
+Solo se evalúan lectores con más de 20 interacciones. Los empates de fecha se
+resuelven de forma estable por `id_libro`; la base no contiene hora. Dentro del
+train se crean folds temporales rolling para ajustar retrieval y LambdaRank sin
+usar el hold-out final.
 
-**Dentro:** modelos sobre el catálogo y los lectores de `data.db`; features de usuario e ítem; ranking top-20; submission en el formato de ejemplo.
+## Arquitectura
+
+El sistema tiene dos etapas:
+
+1. **Retrieval**: popularidad, dos variantes item-item coseno, SVD explícito,
+   ALS/BPR ponderados y perfil TF-IDF. Las fuentes se combinan con cuotas y
+   Reciprocal Rank Fusion para producir entre 100 y 1.000 candidatos.
+2. **Ranking**: LightGBM LambdaRank ordena los candidatos con relevancia lineal
+   0–10 y señales colaborativas, de contenido y secuenciales.
+
+Retrieval se controla con Recall@M, recall ponderado por rating y el techo
+oracle de NDCG@20. La evaluación final usa NDCG@20 macro, Recall@20, cobertura,
+exposición long-tail y bootstrap pareado contra popularidad.
+
+Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
+genera en `submission.csv`. `data.db` siempre se abre en modo de solo lectura.
+
+## Pruebas
+
+```bash
+uv run pytest
+uv run ruff check src tests main.py
+```
