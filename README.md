@@ -75,7 +75,9 @@ oracle de NDCG@20. La evaluación final usa NDCG@20 macro, Recall@20, cobertura,
 exposición long-tail y bootstrap pareado contra popularidad.
 
 Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
-genera en `submission.csv`. `data.db` siempre se abre en modo de solo lectura.
+genera en `submission.csv`. La definición de cada archivo y métrica está en
+[`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre se abre en modo
+de solo lectura.
 
 ## Pruebas
 
