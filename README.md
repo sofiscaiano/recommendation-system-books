@@ -74,7 +74,8 @@ usar el hold-out final.
 
 ## Arquitectura
 
-El sistema tiene dos etapas:
+El detalle de cada método, pesos y librerías está en
+[`docs/metodologias.md`](docs/metodologias.md). El sistema tiene dos etapas:
 
 1. **Retrieval**: popularidad, dos variantes item-item coseno, SVD explícito,
    ALS/BPR ponderados y perfil TF-IDF. Las fuentes se combinan con cuotas y
