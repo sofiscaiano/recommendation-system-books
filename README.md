@@ -47,6 +47,18 @@ costosa:
 uv run python main.py evaluate --tune
 ```
 
+`--note` deja en la corrida qué cambió de lógica. El diff de código contra el
+commit de la corrida anterior se agrega solo.
+
+Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
+(`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido). La corrida
+guarda la configuración, el NDCG@20 del hold-out y los JSON de diagnóstico. Con
+`--tune`, cada trial de Optuna queda anidado con su objetivo. Para comparar:
+
+```bash
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
 ## Evaluación interna
 
 Hasta tener el protocolo oficial cerrado, el hold-out interno es:
@@ -75,9 +87,11 @@ oracle de NDCG@20. La evaluación final usa NDCG@20 macro, Recall@20, cobertura,
 exposición long-tail y bootstrap pareado contra popularidad.
 
 Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
-genera en `submission.csv`. La definición de cada archivo y métrica está en
-[`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre se abre en modo
-de solo lectura.
+genera en `submission.csv`. Cada corrida también deja el log en
+`artifacts/run.log`. Con `--tune`, los hiperparámetros elegidos por Optuna
+quedan en `artifacts/tuned_hyperparameters.json`. La definición de cada archivo
+y métrica está en [`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre
+se abre en modo de solo lectura.
 
 ## Pruebas
 

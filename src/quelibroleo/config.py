@@ -81,6 +81,7 @@ class PipelineConfig:
     artifacts_dir: Path = Path("artifacts")
     output_path: Path = Path("submission.csv")
     random_seed: int = 42
+    run_note: str = ""
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)

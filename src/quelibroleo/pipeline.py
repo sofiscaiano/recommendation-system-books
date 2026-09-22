@@ -350,6 +350,24 @@ def train_ranker_from_history(
     else:
         LOGGER.info("LambdaRank final entrenado; se omiten ablaciones repetidas")
 
+    if tune:
+        tuned_path = Path(config.artifacts_dir) / "tuned_hyperparameters.json"
+        tuned_path.parent.mkdir(parents=True, exist_ok=True)
+        tuned_path.write_text(
+            json.dumps(
+                {
+                    "candidate_budget": budget,
+                    "source_weights": weights,
+                    "source_quotas": quotas,
+                    "ranker": overrides,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        LOGGER.info("Hiperparámetros de Optuna guardados en %s", tuned_path)
+
     fold_metrics = []
     for material, (features, fused) in zip(materials, built, strict=True):
         metrics = retrieval_metrics(fused.candidates, material.target)
@@ -411,7 +429,23 @@ def evaluate(
 ) -> tuple[EvaluationReport, TrainedPipeline]:
     """Evalúa una sola vez sobre el leave-last-20 exterior."""
 
+    from .tracking import log_evaluation, log_summary_artifacts, track_command
+
     config = config or PipelineConfig()
+    with track_command("evaluate", config, tune=tune):
+        report, trained = _evaluate(config, tune=tune, save_artifacts=save_artifacts)
+        log_evaluation(report)
+        if save_artifacts:
+            log_summary_artifacts(Path(config.artifacts_dir))
+        return report, trained
+
+
+def _evaluate(
+    config: PipelineConfig,
+    *,
+    tune: bool,
+    save_artifacts: bool,
+) -> tuple[EvaluationReport, TrainedPipeline]:
     bundle = load_dataset(config.db_path)
     interactions = bundle.interactions
     outer = leave_last_k(interactions, k=config.split.holdout_k)
@@ -541,7 +575,21 @@ def train_final_and_submit(
 ) -> pd.DataFrame:
     """Reentrena con toda la historia válida y genera la entrega."""
 
+    from .tracking import log_summary_artifacts, track_command
+
     config = config or PipelineConfig()
+    with track_command("submit", config, tune=tune):
+        submission = _submit(config, tune=tune, output_path=output_path)
+        log_summary_artifacts(Path(config.artifacts_dir))
+        return submission
+
+
+def _submit(
+    config: PipelineConfig,
+    *,
+    tune: bool,
+    output_path: str | Path | None,
+) -> pd.DataFrame:
     bundle = load_dataset(config.db_path)
     interactions = bundle.interactions
     trained = train_ranker_from_history(

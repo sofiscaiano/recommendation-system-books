@@ -179,9 +179,15 @@ def tune_lambdarank(
         recommendations = ranker.predict(validation)
         return ndcg_at_k(recommendations, validation_truth, k=20)
 
+    from .tracking import optuna_callback
+
     sampler = optuna.samplers.TPESampler(seed=random_state)
     study = optuna.create_study(direction="maximize", sampler=sampler)
-    study.optimize(objective, n_trials=n_trials)
+    study.optimize(
+        objective,
+        n_trials=n_trials,
+        callbacks=[optuna_callback("lambdarank")],
+    )
     best = {
         key: value.item() if isinstance(value, np.generic) else value
         for key, value in study.best_params.items()

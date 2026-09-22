@@ -1,7 +1,8 @@
 # Guía de los diagnósticos
 
-`uv run python main.py evaluate` escribe estos archivos en [`artifacts/`](../artifacts/).
-Ese directorio no se versiona. Los números de esta ejecución corresponden al
+`uv run python main.py evaluate` escribe estos archivos en [`artifacts/`](../artifacts/)
+y los registra, junto con las métricas, en el experimento MLflow `quelibroleo`
+(`mlflow.db`). Ese directorio, la base de MLflow y `mlartifacts/` no se versionan. Los números de esta ejecución corresponden al
 holdout de las últimas 20 interacciones de 3.805 lectores, salvo donde se indica
 que el diagnóstico usa un fold interno.
 
@@ -107,13 +108,25 @@ ser candidatos.
 
 ## `config.json`
 
-Parámetros concretos de la ejecución: semilla, presupuesto de candidatos,
-cuotas, pesos y configuración de LightGBM. Permite saber si el resultado provino
-de los valores por defecto o de `--tune`.
+Parámetros con los que arrancó la ejecución: semilla, presupuesto de candidatos,
+cuotas, pesos y configuración de LightGBM. Son los valores de `PipelineConfig`.
+Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
+`tuned_hyperparameters.json`.
+
+## `tuned_hyperparameters.json`
+
+Solo aparece si la corrida usó `--tune`. Guarda el presupuesto de candidatos,
+los pesos y las cuotas de fusión, y los hiperparámetros de LambdaRank elegidos
+por Optuna. `submit` no relee este archivo: vuelve a usar la config fija, salvo
+que también se le pase `--tune`.
+
+## `run.log`
+
+Log de la corrida (retrieval, entrenamiento y, si aplica, trials de Optuna),
+además de la salida en consola.
 
 ## Archivos que no son diagnósticos
 
 `artifacts/cache/` guarda candidatos intermedios para no repetir el retrieval.
 `evaluated_pipeline.joblib` y `final_pipeline.joblib` guardan los modelos de la
-evaluación y de la entrega. Esta ejecución no contiene estudios de Optuna porque
-no se usó `--tune`.
+evaluación y de la entrega.
