@@ -24,7 +24,7 @@ Resultado oficial del sistema completo contra el baseline de popularidad.
 | `catalog_coverage_at_20` | Cantidad de libros distintos que aparecen en algún top-20, dividida por los libros elegibles del entrenamiento. |
 | `long_tail_exposure_at_20` | Proporción de posiciones del top-20 ocupadas por libros de cola larga. La cola incluye los libros cuyo conteo está en el 80 % inferior de popularidad. |
 | `paired_delta` | Diferencia de NDCG@20 entre el modelo y la popularidad para el mismo usuario. `mean` es el promedio; `lower` y `upper` son el intervalo bootstrap del 95 % con 2.000 remuestreos. |
-| `segments` | NDCG@20 promedio dentro de grupos de usuarios. |
+| `segments` | Métricas por grupo de usuarios. Cada grupo incluye NDCG@20, Recall@20 del ranking, recall de retrieval, cobertura y exposición long-tail. |
 | `candidate_budget` | Cantidad máxima de candidatos entregada al ranker. |
 | `evaluation_users` | Lectores incluidos en el holdout. |
 
@@ -33,6 +33,14 @@ cuatro grupos de igual tamaño según cuántas interacciones tienen en train. `q
 es el grupo con menos historial y `q4` el de mayor actividad.
 `single_date_history` reúne a quienes tienen todas sus interacciones de train
 en una sola fecha; para ellos el orden temporal no es informativo.
+
+La cobertura por segmento usa el mismo catálogo elegible que la métrica global:
+cuenta cuántos libros distintos aparecen en el top-20 de ese grupo. Como cada
+cuartil tiene el mismo número de usuarios, los valores son comparables entre sí.
+
+## `evaluation_segments.csv`
+
+Misma información que `segments` en `evaluation.json`, una fila por grupo.
 
 ## `retrieval_folds.csv`
 

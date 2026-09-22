@@ -25,6 +25,7 @@ from .metrics import (
     paired_bootstrap_delta,
     recall_at_k,
     retrieval_metrics,
+    segment_metrics,
 )
 from .ranker import LambdaRanker, tune_lambdarank
 from .retrieval import (
@@ -65,7 +66,7 @@ class EvaluationReport:
     catalog_coverage_at_20: float
     long_tail_exposure_at_20: float
     paired_delta: dict[str, float]
-    segments: dict[str, float]
+    segments: dict[str, dict[str, float]]
     candidate_budget: int
     evaluation_users: int
 
@@ -402,32 +403,6 @@ def _score_history(
     return recommendations, fused, features
 
 
-def _segment_metrics(
-    per_user_ndcg: pd.Series,
-    train: pd.DataFrame,
-) -> dict[str, float]:
-    counts = train.groupby(USER_COL).size().reindex(per_user_ndcg.index)
-    segments: dict[str, float] = {}
-    if counts.notna().sum() >= 4:
-        buckets = pd.qcut(
-            counts.rank(method="first"),
-            q=4,
-            labels=["activity_q1", "activity_q2", "activity_q3", "activity_q4"],
-        )
-        for label in buckets.cat.categories:
-            users = buckets[buckets == label].index
-            segments[str(label)] = float(per_user_ndcg.reindex(users).mean())
-    distinct_dates = train.groupby(USER_COL)["fecha"].nunique()
-    one_date_users = distinct_dates[distinct_dates == 1].index
-    segments["single_date_history"] = float(
-        per_user_ndcg.reindex(one_date_users).mean()
-    )
-    return {
-        key: (0.0 if np.isnan(value) else value)
-        for key, value in segments.items()
-    }
-
-
 def evaluate(
     config: PipelineConfig | None = None,
     *,
@@ -489,7 +464,13 @@ def evaluate(
             baseline_per_user,
             random_state=config.random_seed,
         ),
-        segments=_segment_metrics(model_per_user, outer.train),
+        segments=segment_metrics(
+            top20,
+            fused.candidates,
+            outer.test,
+            outer.train,
+            eligible_items,
+        ),
         candidate_budget=trained.budget,
         evaluation_users=len(outer.evaluation_users),
     )
@@ -519,6 +500,9 @@ def evaluate(
         pd.DataFrame(trained.ablation_metrics).to_csv(
             artifacts / "feature_ablations.csv", index=False
         )
+        pd.DataFrame(
+            [{"segment": name, **values} for name, values in report.segments.items()]
+        ).to_csv(artifacts / "evaluation_segments.csv", index=False)
         joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
     return report, trained
 

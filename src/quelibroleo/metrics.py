@@ -200,6 +200,67 @@ def long_tail_exposure(
     return float(top[ITEM_COL].isin(tail).mean())
 
 
+def activity_segments(
+    train: pd.DataFrame,
+    users: pd.Index | list[str] | tuple[str, ...],
+) -> dict[str, pd.Index]:
+    """Cuartiles de actividad en train y el grupo de una sola fecha."""
+
+    index = pd.Index(users, dtype=str)
+    counts = train.groupby(USER_COL).size().reindex(index)
+    segments: dict[str, pd.Index] = {}
+    valid = counts.dropna()
+    if len(valid) >= 4:
+        buckets = pd.qcut(
+            valid.rank(method="first"),
+            q=4,
+            labels=["activity_q1", "activity_q2", "activity_q3", "activity_q4"],
+        )
+        for label in buckets.cat.categories:
+            segments[str(label)] = buckets[buckets == label].index
+    dates = train.groupby(USER_COL)["fecha"].nunique().reindex(index)
+    segments["single_date_history"] = dates[dates == 1].index
+    return segments
+
+
+def _nan_to_zero(value: float) -> float:
+    return 0.0 if np.isnan(value) else float(value)
+
+
+def segment_metrics(
+    recommendations: pd.DataFrame,
+    candidates: pd.DataFrame,
+    truth: pd.DataFrame,
+    train: pd.DataFrame,
+    eligible_items: set[str],
+    *,
+    k: int = 20,
+) -> dict[str, dict[str, float]]:
+    """NDCG, recall de retrieval, cobertura y cola larga por segmento."""
+
+    per_user_ndcg = ndcg_per_user(recommendations, truth, k=k)
+    users = per_user_ndcg.index
+    report: dict[str, dict[str, float]] = {}
+    for name, member_index in activity_segments(train, users).items():
+        members = [user for user in member_index if user in users]
+        recs = recommendations[recommendations[USER_COL].isin(members)]
+        cand = candidates[candidates[USER_COL].isin(members)]
+        holdout = truth[truth[USER_COL].isin(members)]
+        retrieval = retrieval_metrics(cand, holdout, k=k)
+        report[name] = {
+            "users": float(len(members)),
+            "ndcg_at_20": _nan_to_zero(per_user_ndcg.reindex(members).mean()),
+            "model_recall_at_20": recall_at_k(recs, holdout, k=k),
+            "retrieval_recall": retrieval.recall,
+            "retrieval_weighted_recall": retrieval.weighted_recall,
+            "catalog_coverage_at_20": catalog_coverage(
+                recs, eligible_items, k=k
+            ),
+            "long_tail_exposure_at_20": long_tail_exposure(recs, train, k=k),
+        }
+    return report
+
+
 def paired_bootstrap_delta(
     challenger: pd.Series,
     baseline: pd.Series,
