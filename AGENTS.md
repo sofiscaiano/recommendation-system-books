@@ -17,6 +17,6 @@ Recomendador de ranking (top-20 libros por `id_lector`). Contexto: [README.md](R
 ## Cómo cambiar el repo
 
 - Preferir ediciones mínimas en el paquete. No modificar `test_inicial.ipynb` salvo pedido.
-- Cada cambio aprobado se **commitea al terminar**, en su propio commit. No dejar el trabajo solo en el working tree y no esperar un pedido aparte de "commit". Aprobado incluye un ok explícito, la confirmación de un plan o un pedido de implementar. Omitir el commit solo si el usuario pide no hacerlo.
+- Cada cambio se **commitea al terminar**, en su propio commit, sin pedir aprobación ni un pedido aparte de "commit". No dejar el trabajo solo en el working tree. Omitir el commit solo si el usuario pide no hacerlo.
 - No pushear a remoto salvo pedido.
 - Commits cortos, en español, enfocados en el porqué. No incluir `data.db`, secretos ni artefactos grandes.
