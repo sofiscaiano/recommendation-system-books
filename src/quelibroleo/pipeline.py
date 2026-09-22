@@ -116,6 +116,7 @@ def _collect_material(
     fold: int,
     per_source: int,
     cache_dir: Path | None = None,
+    used_caches: set[Path] | None = None,
 ) -> FoldMaterial:
     cache_path: Path | None = None
     if cache_dir is not None:
@@ -133,6 +134,8 @@ def _collect_material(
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"fold_{fold}_{fingerprint.hexdigest()[:16]}.joblib"
+        if used_caches is not None:
+            used_caches.add(cache_path)
         if cache_path.exists():
             LOGGER.info("Cargando candidatos cacheados del fold %s", fold)
             cached = joblib.load(cache_path)
@@ -179,6 +182,34 @@ def _collect_material(
             compress=3,
         )
     return material
+
+
+def _retain_latest_caches(cache_dir: Path, command: str, used: set[Path]) -> None:
+    """Deja la última generación de evaluate y la de submit."""
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    names = sorted(path.name for path in used)
+    (cache_dir / f"last_{command}.txt").write_text(
+        "\n".join(names) + ("\n" if names else ""),
+        encoding="utf-8",
+    )
+    other = "submit" if command == "evaluate" else "evaluate"
+    other_manifest = cache_dir / f"last_{other}.txt"
+    keep = set(names)
+    if other_manifest.exists():
+        keep.update(
+            line.strip() for line in other_manifest.read_text(encoding="utf-8").splitlines() if line.strip()
+        )
+    else:
+        LOGGER.info(
+            "Sin manifiesto de %s; no se borran caches ajenos a esta corrida",
+            other,
+        )
+        return
+    for path in cache_dir.glob("fold_*.joblib"):
+        if path.name not in keep:
+            LOGGER.info("Borrando cache fuera de las últimas generaciones: %s", path.name)
+            path.unlink()
 
 
 def _fusion_from_config(config: PipelineConfig) -> tuple[CandidateFusion, int]:
@@ -237,6 +268,7 @@ def train_ranker_from_history(
     *,
     tune: bool = False,
     execute_ablations: bool = True,
+    used_caches: set[Path] | None = None,
 ) -> TrainedPipeline:
     """Entrena LambdaRank exclusivamente con pseudo-futuros rolling."""
 
@@ -269,6 +301,7 @@ def train_ranker_from_history(
             fold.fold,
             per_source,
             Path(config.artifacts_dir) / "cache",
+            used_caches,
         )
         for fold in folds
     ]
@@ -396,6 +429,7 @@ def _score_history(
     users: tuple[str, ...],
     books: pd.DataFrame,
     config: PipelineConfig,
+    used_caches: set[Path] | None = None,
 ) -> tuple[pd.DataFrame, FusionResult, FeatureSet]:
     material = _collect_material(
         train,
@@ -406,6 +440,7 @@ def _score_history(
         fold=999,
         per_source=_per_source_depth(trained.budget, trained.quotas),
         cache_dir=Path(config.artifacts_dir) / "cache",
+        used_caches=used_caches,
     )
     fusion = CandidateFusion(
         weights=trained.weights,
@@ -454,11 +489,13 @@ def _evaluate(
         len(outer.evaluation_users),
         len(outer.test),
     )
+    used_caches: set[Path] = set()
     trained = train_ranker_from_history(
         outer.train,
         bundle.books,
         config,
         tune=tune,
+        used_caches=used_caches,
     )
 
     popularity = PopularityRecommender().fit(
@@ -476,6 +513,7 @@ def _evaluate(
         outer.evaluation_users,
         bundle.books,
         config,
+        used_caches,
     )
     LOGGER.info("Ranking del holdout completado")
     top20 = recommendations[recommendations["rank"] <= 20].copy()
@@ -538,6 +576,7 @@ def _evaluate(
             [{"segment": name, **values} for name, values in report.segments.items()]
         ).to_csv(artifacts / "evaluation_segments.csv", index=False)
         joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
+    _retain_latest_caches(Path(config.artifacts_dir) / "cache", "evaluate", used_caches)
     return report, trained
 
 
@@ -592,12 +631,14 @@ def _submit(
 ) -> pd.DataFrame:
     bundle = load_dataset(config.db_path)
     interactions = bundle.interactions
+    used_caches: set[Path] = set()
     trained = train_ranker_from_history(
         interactions,
         bundle.books,
         config,
         tune=tune,
         execute_ablations=False,
+        used_caches=used_caches,
     )
     example = pd.read_csv(config.example_path, dtype=str)
     users = list(dict.fromkeys(example[USER_COL].astype(str)))
@@ -607,6 +648,7 @@ def _submit(
         tuple(users),
         bundle.books,
         config,
+        used_caches,
     )
     catalog = observed_catalog(interactions, bundle.books)
     popularity = PopularityRecommender().fit(
@@ -626,6 +668,7 @@ def _submit(
     artifacts = Path(config.artifacts_dir)
     artifacts.mkdir(parents=True, exist_ok=True)
     joblib.dump(trained, artifacts / "final_pipeline.joblib")
+    _retain_latest_caches(Path(config.artifacts_dir) / "cache", "submit", used_caches)
     return submission
 
 
