@@ -311,7 +311,7 @@ def train_ranker_from_history(
             materials[-1].source_candidates,
             materials[-1].target,
             budgets=config.retrieval.candidate_budgets,
-            trials_per_budget=max(5, config.ranker.optuna_trials // 2),
+            trials_per_budget=config.retrieval.optuna_trials,
             rrf_k=config.retrieval.rrf_k,
             weight_range=config.retrieval.fusion_weight,
             quota_range=config.retrieval.fusion_quota_share,
