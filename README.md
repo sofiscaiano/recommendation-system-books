@@ -53,9 +53,8 @@ Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
 único (`fecha-comando-modo-sufijo`). Ese nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
-cambia de columnas: el vínculo está en `submission.csv.run.json`. Con `--tune`,
-cada study de Optuna abre una corrida hija `{run_name}__{etapa}` con la serie
-de trials en el step.
+cambia de columnas: el vínculo está en `submission.csv.run.json`. Con `--tune`, el study de Optuna abre una corrida hija `{run_name}__pipeline`
+con la serie de trials en el step.
 Para comparar:
 
 ```bash

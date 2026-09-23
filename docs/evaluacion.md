@@ -109,8 +109,8 @@ ser candidatos.
 ## `run.json`
 
 Nombre único de la corrida MLflow (`run_name`). El mismo valor encabeza los JSON
-y los CSV de diagnóstico de esa ejecución, y es el prefijo de los studies de
-Optuna (`{run_name}__fusion-m200`, `{run_name}__lambdarank`). Junto a
+y los CSV de diagnóstico de esa ejecución, y es el prefijo del study de
+Optuna (`{run_name}__pipeline`). Junto a
 `submission.csv` queda `submission.csv.run.json` con ese nombre: el CSV de
 entrega sigue siendo solo `id_lector,id_libro`.
 

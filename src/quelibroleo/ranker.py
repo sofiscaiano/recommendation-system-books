@@ -6,13 +6,11 @@ from dataclasses import asdict
 from typing import Any
 
 import lightgbm as lgb
-import numpy as np
 import pandas as pd
 
 from .config import RankerConfig
 from .data import ITEM_COL, USER_COL
 from .features import FeatureSet
-from .metrics import ndcg_at_k
 
 
 def _ordered_groups(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[int]]:
@@ -45,7 +43,6 @@ class LambdaRanker:
     def _parameters(self) -> dict[str, Any]:
         values = asdict(self.config)
         values.pop("early_stopping_rounds")
-        values.pop("optuna_trials")
         values.pop("search_space")
         values.update(self.overrides)
         return {
@@ -133,67 +130,3 @@ class LambdaRanker:
                 ),
             }
         ).sort_values("importance_gain", ascending=False)
-
-
-def tune_lambdarank(
-    train: FeatureSet,
-    validation: FeatureSet,
-    validation_truth: pd.DataFrame,
-    *,
-    base_config: RankerConfig | None = None,
-    n_trials: int = 30,
-    random_state: int = 42,
-) -> tuple[dict[str, Any], object]:
-    """Ajusta LambdaRank con Optuna usando NDCG@20 end-to-end."""
-
-    try:
-        import optuna
-    except ImportError as exc:
-        raise ImportError("El tuning requiere `optuna`") from exc
-
-    config = base_config or RankerConfig()
-
-    def objective(trial: Any) -> float:
-        parameters = {
-            name: spec.suggest(trial, name)
-            for name, spec in config.search_space.items()
-        }
-        num_leaves = int(parameters.get("num_leaves", config.num_leaves))
-        min_child_samples = int(
-            parameters.get("min_child_samples", config.min_child_samples)
-        )
-        max_depth = int(parameters.get("max_depth", config.max_depth))
-        n_rows = len(train.frame)
-        leaves_exceed_rows = min_child_samples * num_leaves > n_rows
-        leaves_exceed_depth = max_depth > 0 and num_leaves > 2**max_depth
-        if leaves_exceed_rows or leaves_exceed_depth:
-            raise optuna.TrialPruned()
-        ranker = LambdaRanker(
-            config,
-            random_state=random_state,
-            overrides=parameters,
-        ).fit(train, validation)
-        recommendations = ranker.predict(validation)
-        return ndcg_at_k(recommendations, validation_truth, k=20)
-
-    from .tracking import log_optuna_plots, optuna_callback, study_name, track_study
-
-    sampler = optuna.samplers.TPESampler(seed=random_state)
-    study = optuna.create_study(
-        study_name=study_name("lambdarank"),
-        direction="maximize",
-        sampler=sampler,
-    )
-    with track_study("lambdarank"):
-        study.optimize(
-            objective,
-            n_trials=n_trials,
-            callbacks=[optuna_callback("lambdarank")],
-            show_progress_bar=True,
-        )
-        log_optuna_plots(study, "lambdarank")
-    best = {
-        key: value.item() if isinstance(value, np.generic) else value
-        for key, value in study.best_params.items()
-    }
-    return best, study

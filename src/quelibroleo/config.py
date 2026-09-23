@@ -46,7 +46,6 @@ class RetrievalConfig:
     implicit_iterations: int = 20
     tfidf_max_features: int = 60_000
     rrf_k: float = 60.0
-    optuna_trials: int = 15
     fusion_weight: SearchRange = field(
         default_factory=lambda: SearchRange(0.1, 3.0, log=True)
     )
@@ -91,7 +90,6 @@ class RankerConfig:
     reg_alpha: float = 0.0
     reg_lambda: float = 1.0
     early_stopping_rounds: int = 30
-    optuna_trials: int = 30
     search_space: dict[str, SearchRange] = field(
         default_factory=lambda: {
             "learning_rate": SearchRange(0.015, 0.12, log=True),
@@ -116,6 +114,7 @@ class PipelineConfig:
     output_path: Path = Path("submission.csv")
     random_seed: int = 42
     run_note: str = ""
+    optuna_trials: int = 30
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)

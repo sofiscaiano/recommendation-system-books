@@ -27,7 +27,7 @@ from .metrics import (
     retrieval_metrics,
     segment_metrics,
 )
-from .ranker import LambdaRanker, tune_lambdarank
+from .ranker import LambdaRanker
 from .retrieval import (
     CandidateFusion,
     FusionResult,
@@ -36,7 +36,7 @@ from .retrieval import (
     retrieve_all,
 )
 from .splits import leave_last_k, rolling_origin_folds
-from .tuning import FusionSelection, tune_fusion
+from .tuning import tune_pipeline
 
 LOGGER = logging.getLogger(__name__)
 
@@ -306,17 +306,9 @@ def train_ranker_from_history(
         for fold in folds
     ]
 
+    overrides: dict[str, Any] = {}
     if tune:
-        selection: FusionSelection = tune_fusion(
-            materials[-1].source_candidates,
-            materials[-1].target,
-            budgets=config.retrieval.candidate_budgets,
-            trials_per_budget=config.retrieval.optuna_trials,
-            rrf_k=config.retrieval.rrf_k,
-            weight_range=config.retrieval.fusion_weight,
-            quota_range=config.retrieval.fusion_quota_share,
-            random_state=config.random_seed,
-        )
+        selection = tune_pipeline(materials, config)
         fusion = CandidateFusion(
             weights=selection.weights,
             quotas=selection.quotas,
@@ -325,6 +317,7 @@ def train_ranker_from_history(
         budget = selection.budget
         weights = selection.weights
         quotas = selection.quotas
+        overrides = selection.ranker
     else:
         fusion, budget = _fusion_from_config(config)
         weights = dict(config.retrieval.source_weights)
@@ -335,17 +328,6 @@ def train_ranker_from_history(
     feature_sets = [features for features, _ in built]
     train_set = _concat_feature_sets(feature_sets[:-1])
     validation_set = feature_sets[-1]
-
-    overrides: dict[str, Any] = {}
-    if tune:
-        overrides, _ = tune_lambdarank(
-            train_set,
-            validation_set,
-            materials[-1].target,
-            base_config=config.ranker,
-            n_trials=config.ranker.optuna_trials,
-            random_state=config.random_seed,
-        )
     ranker = LambdaRanker(
         config.ranker,
         random_state=config.random_seed,

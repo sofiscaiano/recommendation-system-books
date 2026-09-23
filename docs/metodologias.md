@@ -109,10 +109,11 @@ Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 
    con `k = 60`. Los pesos por defecto son 0,5 (popularidad), 1,0 (cosenos,
    SVD, ALS, BPR) y 0,8 (TF-IDF). Un libro que no aparece en una fuente no
-   suma ese término. Con `--tune`, Optuna recorre un peso y una cuota relativa
-   por fuente; los intervalos son `RetrievalConfig.fusion_weight` (0,1–3, log)
-   y `fusion_quota_share` (0–1). La grilla de presupuestos sigue siendo
-   `candidate_budgets`.
+   suma ese término. Con `--tune`, un único study de Optuna recorre el
+   presupuesto (`candidate_budgets`), un peso y una cuota relativa por fuente.
+   Los intervalos son `RetrievalConfig.fusion_weight` (0,1–3, log) y
+   `fusion_quota_share` (0–1). La cuota se normaliza y ocupa alrededor del
+   80 % de M.
 
 El orden de la fusión (`retrieval_rank`, `rrf_score`) no es el ranking final:
 solo define quién entra al ranker. Los scores y rangos de cada fuente se
@@ -142,14 +143,14 @@ El desempate del score predicho es estable por `id_libro`.
 Librerías: LightGBM ≥ 4.7, NumPy, pandas. NDCG de evaluación:
 `sklearn.metrics.ndcg_score` en `src/quelibroleo/metrics.py`.
 
-La búsqueda opcional (`main.py evaluate --tune`) usa Optuna. Qué parámetros
-entra a la búsqueda y con qué intervalo está en `RankerConfig.search_space` y
-en `RetrievalConfig.fusion_weight` / `fusion_quota_share`
-(`src/quelibroleo/config.py`). LambdaRank se elige por NDCG@20 en un fold
-interno, sin tocar el hold-out final. `n_estimators` y `early_stopping_rounds`
-quedan fijos. Un trial se descarta si `min_child_samples * num_leaves` supera
-las filas de entrenamiento, o si `num_leaves` supera `2^max_depth` cuando la
-profundidad está acotada.
+La búsqueda opcional (`main.py evaluate --tune`) es un solo study de Optuna,
+`PipelineConfig.optuna_trials` trials. Recorre juntos el presupuesto, los pesos
+y las cuotas de fusión, y `RankerConfig.search_space`. El objetivo es el
+NDCG@20 del top-20 de LambdaRank en el último fold rolling, entrenando con los
+folds anteriores. Ese fold también corta el early stopping. El hold-out oficial
+no entra al study. `n_estimators` y `early_stopping_rounds` quedan fijos. Un
+trial se descarta si `num_leaves` supera `2^max_depth`, o si
+`min_child_samples * num_leaves` supera las filas de entrenamiento.
 
 ### Features del ranker
 
