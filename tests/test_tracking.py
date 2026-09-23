@@ -9,6 +9,14 @@ from quelibroleo.pipeline import EvaluationReport
 from quelibroleo.tracking import log_evaluation, track_command
 
 
+def test_track_command_requires_note() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="descripción"):
+        with track_command("evaluate", PipelineConfig(), tune=False):
+            pass
+
+
 def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
     report = EvaluationReport(
@@ -25,7 +33,11 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
         candidate_budget=200,
         evaluation_users=3,
     )
-    with track_command("evaluate", PipelineConfig(), tune=False):
+    with track_command(
+        "evaluate",
+        PipelineConfig(run_note="hold-out de prueba"),
+        tune=False,
+    ):
         log_evaluation(report)
         run_id = mlflow.active_run().info.run_id
 
@@ -35,7 +47,7 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     assert stored.data.metrics["paired_delta.mean"] == 0.1
     assert stored.data.params["tune"] == "False"
     assert stored.data.params["command"] == "evaluate"
-    assert "Primera corrida" in stored.data.tags["mlflow.note.content"]
+    assert stored.data.tags["mlflow.note.content"] == "hold-out de prueba"
     assert stored.data.tags["git_commit"]
     assert stored.info.run_name == stored.data.tags["run_name"]
     assert "-evaluate-fixed-" in stored.info.run_name
@@ -52,7 +64,11 @@ def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
     from quelibroleo.tracking import optuna_callback, study_name
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-    with track_command("evaluate", PipelineConfig(), tune=True):
+    with track_command(
+        "evaluate",
+        PipelineConfig(run_note="trial anidado"),
+        tune=True,
+    ):
         parent = mlflow.active_run().info.run_id
         run_name = mlflow.active_run().info.run_name
         named = study_name("fusion-m200")

@@ -36,19 +36,18 @@ Python ≥ 3.13, dependencias con [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
-uv run python main.py evaluate
-uv run python main.py submit
+uv run python main.py evaluate --note "qué se está probando"
+uv run python main.py submit --note "qué se está entregando"
 ```
 
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
 costosa:
 
 ```bash
-uv run python main.py evaluate --tune
+uv run python main.py evaluate --tune --note "búsqueda de hiperparámetros"
 ```
 
-`--note` deja en la corrida qué cambió de lógica. El diff de código contra el
-commit de la corrida anterior se agrega solo.
+`--note` es obligatorio. Ese texto queda como descripción de la corrida.
 
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre

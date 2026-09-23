@@ -1,6 +1,6 @@
 # Guía de los diagnósticos
 
-`uv run python main.py evaluate` escribe estos archivos en [`artifacts/`](../artifacts/)
+`uv run python main.py evaluate --note "..."` escribe estos archivos en [`artifacts/`](../artifacts/)
 y los registra, junto con las métricas, en el experimento MLflow `quelibroleo`
 (`mlflow.db`). Ese directorio, la base de MLflow y `mlartifacts/` no se versionan. Los números de esta ejecución corresponden al
 holdout de las últimas 20 interacciones de 3.805 lectores, salvo donde se indica

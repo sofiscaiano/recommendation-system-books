@@ -33,7 +33,7 @@ NoteOption = Annotated[
     str,
     typer.Option(
         "--note",
-        help="Qué cambió respecto de la corrida anterior, además del diff de código",
+        help="Descripción obligatoria de esta corrida",
     ),
 ]
 
@@ -81,6 +81,8 @@ def _run(
     seed: int,
     note: str,
 ) -> None:
+    if not note.strip():
+        raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
     config = _config(db, example, output, artifacts, seed, note)
     logging.getLogger(__name__).info(
@@ -131,7 +133,7 @@ def evaluate(
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
     seed: SeedOption = 42,
-    note: NoteOption = "",
+    note: NoteOption = ...,
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
 
@@ -155,7 +157,7 @@ def submit(
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
     seed: SeedOption = 42,
-    note: NoteOption = "",
+    note: NoteOption = ...,
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
 
@@ -179,7 +181,7 @@ def run_all(
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
     seed: SeedOption = 42,
-    note: NoteOption = "",
+    note: NoteOption = ...,
 ) -> None:
     """Evalúa y después genera la entrega."""
 

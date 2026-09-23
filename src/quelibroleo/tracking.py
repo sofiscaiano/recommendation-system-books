@@ -103,10 +103,12 @@ def study_name(stage: str) -> str:
     return f"{run_name}__{stage}"
 
 
-def _git(*args: str) -> str:
+def git_head() -> str:
+    """Commit actual, o vacío si git no está disponible."""
+
     try:
         completed = subprocess.run(
-            ["git", *args],
+            ["git", "rev-parse", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
@@ -115,38 +117,6 @@ def _git(*args: str) -> str:
     except (OSError, subprocess.CalledProcessError):
         return ""
     return completed.stdout.strip()
-
-
-def _previous_commit() -> str:
-    import mlflow
-
-    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
-    if experiment is None:
-        return ""
-    runs = mlflow.tracking.MlflowClient().search_runs(
-        [experiment.experiment_id],
-        order_by=["start_time DESC"],
-        max_results=1,
-    )
-    if not runs:
-        return ""
-    return runs[0].data.tags.get("git_commit", "")
-
-
-def change_description(note: str) -> tuple[str, str]:
-    """Texto de la corrida y diff contra el commit de la corrida anterior."""
-
-    head = _git("rev-parse", "HEAD")
-    previous = _previous_commit()
-    if previous:
-        diff = _git("diff", "--stat", previous)
-        heading = f"Cambios de código contra {previous[:7]}"
-    else:
-        diff = _git("diff", "--stat", "HEAD")
-        heading = "Primera corrida; cambios sin commitear"
-    lines = [part.strip() for part in (note.strip(), heading, diff) if part.strip()]
-    summary = "\n".join(lines)
-    return head, summary[:8000]
 
 
 def tracking_uri() -> str:
@@ -208,9 +178,13 @@ def track_command(
 
     import mlflow
 
+    description = config.run_note.strip()
+    if not description:
+        raise ValueError("La corrida exige una descripción en config.run_note")
+
     mlflow.set_tracking_uri(tracking_uri())
     mlflow.set_experiment(EXPERIMENT_NAME)
-    head, description = change_description(config.run_note)
+    head = git_head()
     run_name = new_run_name(command, tune=tune)
     token = _current_run_name.set(run_name)
     try:
