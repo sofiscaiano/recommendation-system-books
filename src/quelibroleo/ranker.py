@@ -158,6 +158,16 @@ def tune_lambdarank(
             name: spec.suggest(trial, name)
             for name, spec in config.search_space.items()
         }
+        num_leaves = int(parameters.get("num_leaves", config.num_leaves))
+        min_child_samples = int(
+            parameters.get("min_child_samples", config.min_child_samples)
+        )
+        max_depth = int(parameters.get("max_depth", config.max_depth))
+        n_rows = len(train.frame)
+        leaves_exceed_rows = min_child_samples * num_leaves > n_rows
+        leaves_exceed_depth = max_depth > 0 and num_leaves > 2**max_depth
+        if leaves_exceed_rows or leaves_exceed_depth:
+            raise optuna.TrialPruned()
         ranker = LambdaRanker(
             config,
             random_state=random_state,

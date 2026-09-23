@@ -147,7 +147,9 @@ entra a la búsqueda y con qué intervalo está en `RankerConfig.search_space` y
 en `RetrievalConfig.fusion_weight` / `fusion_quota_share`
 (`src/quelibroleo/config.py`). LambdaRank se elige por NDCG@20 en un fold
 interno, sin tocar el hold-out final. `n_estimators` y `early_stopping_rounds`
-quedan fijos.
+quedan fijos. Un trial se descarta si `min_child_samples * num_leaves` supera
+las filas de entrenamiento, o si `num_leaves` supera `2^max_depth` cuando la
+profundidad está acotada.
 
 ### Features del ranker
 
