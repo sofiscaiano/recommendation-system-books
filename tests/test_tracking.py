@@ -60,20 +60,22 @@ class _Trial:
     params: dict[str, float]
 
 
-def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
-    from quelibroleo.tracking import optuna_callback, study_name
+def test_optuna_study_is_one_child_run(tmp_path, monkeypatch) -> None:
+    from quelibroleo.tracking import optuna_callback, track_study
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
     with track_command(
         "evaluate",
-        PipelineConfig(run_note="trial anidado"),
+        PipelineConfig(run_note="study anidado"),
         tune=True,
     ):
         parent = mlflow.active_run().info.run_id
         run_name = mlflow.active_run().info.run_name
-        named = study_name("fusion-m200")
-        study = type("Study", (), {"study_name": named})()
-        optuna_callback("fusion-m200")(study, _Trial(3, 0.42, {"weight__svd": 1.2}))
+        study = type("Study", (), {"study_name": f"{run_name}__fusion-m200"})()
+        callback = optuna_callback("fusion-m200")
+        with track_study("fusion-m200"):
+            callback(study, _Trial(0, 0.2, {"weight__svd": 1.0}))
+            callback(study, _Trial(1, 0.42, {"weight__svd": 1.2}))
 
     runs = mlflow.tracking.MlflowClient().search_runs(
         experiment_ids=[mlflow.get_experiment_by_name("quelibroleo").experiment_id]
@@ -81,8 +83,8 @@ def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
     client = mlflow.tracking.MlflowClient()
     nested = [run for run in runs if run.info.run_id != parent]
     assert len(nested) == 1
+    assert nested[0].info.run_name == f"{run_name}__fusion-m200"
     assert nested[0].data.metrics["objective"] == 0.42
     assert nested[0].data.tags["mlflow.parentRunId"] == parent
-    assert nested[0].data.tags["study"] == f"{run_name}__fusion-m200"
-    history = client.get_metric_history(parent, "fusion-m200.objective")
-    assert [(point.step, point.value) for point in history] == [(3, 0.42)]
+    history = client.get_metric_history(nested[0].info.run_id, "objective")
+    assert [(point.step, point.value) for point in history] == [(0, 0.2), (1, 0.42)]

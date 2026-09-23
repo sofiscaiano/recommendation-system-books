@@ -255,42 +255,43 @@ def _trial_metrics(trial: Any) -> dict[str, float]:
             metrics[str(key)] = float(value)
             continue
         for field, number in _numeric_fields(value).items():
-            metrics[f"{key}.{field}"] = number
+            metrics[_metric_key(f"{key}_{field}")] = number
     return metrics
 
 
+def _metric_key(name: str) -> str:
+    """MLflow 3 usa el punto como separador de dataset y no grafica esas claves."""
+
+    return name.replace(".", "_").replace("/", "_")
+
+
+@contextmanager
+def track_study(stage: str) -> Iterator[None]:
+    """Abre una corrida hija por study, donde se grafica la serie de trials."""
+
+    import mlflow
+
+    if mlflow.active_run() is None:
+        yield
+        return
+    name = study_name(stage)
+    with mlflow.start_run(run_name=name, nested=True):
+        mlflow.set_tags({"stage": stage, "study": name})
+        yield
+
+
 def optuna_callback(stage: str):
-    """Callback de Optuna que anida cada trial y grafica la serie en el padre."""
+    """Registra cada trial como un step de la corrida del study."""
 
     def _callback(study: Any, trial: Any) -> None:
         import mlflow
 
-        parent = mlflow.active_run()
-        if parent is None or trial.value is None:
+        if mlflow.active_run() is None or trial.value is None:
             return
-        metrics = _trial_metrics(trial)
-        for key, value in metrics.items():
-            mlflow.log_metric(
-                f"{stage}.{key}",
-                value,
-                step=int(trial.number),
-                run_id=parent.info.run_id,
-            )
-        with mlflow.start_run(
-            run_name=f"{stage}-trial-{trial.number}",
-            nested=True,
-        ):
-            mlflow.log_params(
-                {key: str(value)[:500] for key, value in trial.params.items()}
-            )
-            mlflow.log_metrics(metrics)
-            mlflow.set_tags(
-                {
-                    "stage": stage,
-                    "trial_number": str(trial.number),
-                    "study": study.study_name,
-                }
-            )
+        for key, value in _trial_metrics(trial).items():
+            mlflow.log_metric(_metric_key(key), value, step=int(trial.number))
+        mlflow.set_tag("optuna_study", study.study_name)
+        mlflow.set_tag("stage", stage)
 
     return _callback
 
