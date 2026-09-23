@@ -171,8 +171,36 @@ def log_summary_artifacts(artifacts_dir: Path) -> None:
             mlflow.log_artifact(str(path))
 
 
+def _numeric_fields(value: Any) -> dict[str, float]:
+    from dataclasses import asdict, is_dataclass
+
+    if is_dataclass(value) and not isinstance(value, type):
+        value = asdict(value)
+    if not isinstance(value, dict):
+        return {}
+    fields: dict[str, float] = {}
+    for key, nested in value.items():
+        if isinstance(nested, bool) or not isinstance(nested, (int, float)):
+            continue
+        fields[str(key)] = float(nested)
+    return fields
+
+
+def _trial_metrics(trial: Any) -> dict[str, float]:
+    metrics = {"objective": float(trial.value)}
+    for key, value in getattr(trial, "user_attrs", {}).items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            metrics[str(key)] = float(value)
+            continue
+        for field, number in _numeric_fields(value).items():
+            metrics[f"{key}.{field}"] = number
+    return metrics
+
+
 def optuna_callback(stage: str):
-    """Callback de Optuna que anida cada trial bajo la corrida activa."""
+    """Callback de Optuna que anida cada trial y grafica la serie en el padre."""
 
     def _callback(study: Any, trial: Any) -> None:
         import mlflow
@@ -180,6 +208,14 @@ def optuna_callback(stage: str):
         parent = mlflow.active_run()
         if parent is None or trial.value is None:
             return
+        metrics = _trial_metrics(trial)
+        for key, value in metrics.items():
+            mlflow.log_metric(
+                f"{stage}.{key}",
+                value,
+                step=int(trial.number),
+                run_id=parent.info.run_id,
+            )
         with mlflow.start_run(
             run_name=f"{stage}-trial-{trial.number}",
             nested=True,
@@ -187,7 +223,7 @@ def optuna_callback(stage: str):
             mlflow.log_params(
                 {key: str(value)[:500] for key, value in trial.params.items()}
             )
-            mlflow.log_metric("objective", float(trial.value))
+            mlflow.log_metrics(metrics)
             mlflow.set_tags(
                 {
                     "stage": stage,
@@ -197,3 +233,56 @@ def optuna_callback(stage: str):
             )
 
     return _callback
+
+
+def _contour_params(study: Any) -> list[str] | None:
+    names = list(study.best_params)
+    if len(names) <= 6:
+        return names or None
+    try:
+        import optuna
+
+        ranked = list(optuna.importance.get_param_importances(study))
+    except (ValueError, RuntimeError, ImportError, ArithmeticError):
+        ranked = names
+    return ranked[:6]
+
+
+def log_optuna_plots(study: Any, stage: str) -> None:
+    """Guarda importancia, contorno y cortes del study en la corrida activa."""
+
+    import logging
+    import tempfile
+    from pathlib import Path
+
+    import mlflow
+
+    if mlflow.active_run() is None:
+        return
+    completed = [
+        trial
+        for trial in study.trials
+        if trial.value is not None and trial.state.name == "COMPLETE"
+    ]
+    if len(completed) < 2:
+        return
+
+    from optuna.visualization import plot_contour, plot_param_importances, plot_slice
+
+    logger = logging.getLogger(__name__)
+    plots = {
+        "param_importances": lambda: plot_param_importances(study),
+        "contour": lambda: plot_contour(study, params=_contour_params(study)),
+        "slice": lambda: plot_slice(study),
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for name, builder in plots.items():
+            try:
+                figure = builder()
+            except (ValueError, RuntimeError, ImportError, ArithmeticError):
+                logger.warning("No se pudo construir plot_%s de %s", name, stage)
+                continue
+            path = root / f"{name}.html"
+            figure.write_html(path, include_plotlyjs="cdn")
+            mlflow.log_artifact(str(path), artifact_path=f"optuna/{stage}")

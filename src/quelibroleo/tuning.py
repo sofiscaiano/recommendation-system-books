@@ -89,15 +89,18 @@ def tune_fusion(
             trial.set_user_attr("metrics", metrics)
             return 0.5 * metrics.weighted_recall + 0.5 * metrics.oracle_ndcg
 
-        from .tracking import optuna_callback
+        from .tracking import log_optuna_plots, optuna_callback
 
+        stage = f"fusion-m{budget}"
         sampler = optuna.samplers.TPESampler(seed=random_state + budget)
         study = optuna.create_study(direction="maximize", sampler=sampler)
         study.optimize(
             objective,
             n_trials=trials_per_budget,
-            callbacks=[optuna_callback(f"fusion-m{budget}")],
+            callbacks=[optuna_callback(stage)],
+            show_progress_bar=True,
         )
+        log_optuna_plots(study, stage)
         studies[budget] = study
         trial = study.best_trial
         best_by_budget[budget] = (

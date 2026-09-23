@@ -58,7 +58,10 @@ def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
     runs = mlflow.tracking.MlflowClient().search_runs(
         experiment_ids=[mlflow.get_experiment_by_name("quelibroleo").experiment_id]
     )
+    client = mlflow.tracking.MlflowClient()
     nested = [run for run in runs if run.info.run_id != parent]
     assert len(nested) == 1
     assert nested[0].data.metrics["objective"] == 0.42
     assert nested[0].data.tags["mlflow.parentRunId"] == parent
+    history = client.get_metric_history(parent, "fusion-m200.objective")
+    assert [(point.step, point.value) for point in history] == [(3, 0.42)]
