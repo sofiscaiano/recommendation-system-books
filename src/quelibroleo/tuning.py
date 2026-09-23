@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from .config import SearchRange
 from .metrics import RetrievalMetrics, retrieval_metrics
 from .retrieval import CandidateFusion
 
@@ -30,6 +31,8 @@ def tune_fusion(
     trials_per_budget: int = 20,
     tolerance: float = 0.01,
     rrf_k: float = 60.0,
+    weight_range: SearchRange | None = None,
+    quota_range: SearchRange | None = None,
     random_state: int = 42,
 ) -> FusionSelection:
     """Ajusta pesos/cuotas y elige el menor M casi óptimo.
@@ -44,6 +47,8 @@ def tune_fusion(
     except ImportError as exc:
         raise ImportError("El tuning de fusión requiere `optuna`") from exc
 
+    weight_range = weight_range or SearchRange(0.1, 3.0, log=True)
+    quota_range = quota_range or SearchRange(0.0, 1.0)
     sources = sorted(source_candidates["source"].unique())
     if not sources:
         raise ValueError("No hay fuentes para ajustar")
@@ -59,13 +64,11 @@ def tune_fusion(
 
         def objective(trial: Any, current_budget: int = budget) -> float:
             weights = {
-                source: trial.suggest_float(
-                    f"weight__{source}", 0.1, 3.0, log=True
-                )
+                source: weight_range.suggest(trial, f"weight__{source}")
                 for source in sources
             }
             quota_shares = {
-                source: trial.suggest_float(f"quota__{source}", 0.0, 1.0)
+                source: quota_range.suggest(trial, f"quota__{source}")
                 for source in sources
             }
             share_total = sum(quota_shares.values()) or 1.0

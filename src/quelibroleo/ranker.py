@@ -46,6 +46,7 @@ class LambdaRanker:
         values = asdict(self.config)
         values.pop("early_stopping_rounds")
         values.pop("optuna_trials")
+        values.pop("search_space")
         values.update(self.overrides)
         return {
             "objective": "lambdarank",
@@ -154,22 +155,8 @@ def tune_lambdarank(
 
     def objective(trial: Any) -> float:
         parameters = {
-            "learning_rate": trial.suggest_float(
-                "learning_rate", 0.015, 0.12, log=True
-            ),
-            "num_leaves": trial.suggest_int("num_leaves", 15, 127, log=True),
-            "max_depth": trial.suggest_int("max_depth", 4, 12),
-            "min_child_samples": trial.suggest_int(
-                "min_child_samples", 10, 100
-            ),
-            "subsample": trial.suggest_float("subsample", 0.65, 1.0),
-            "colsample_bytree": trial.suggest_float(
-                "colsample_bytree", 0.6, 1.0
-            ),
-            "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
-            "reg_lambda": trial.suggest_float(
-                "reg_lambda", 1e-8, 20.0, log=True
-            ),
+            name: spec.suggest(trial, name)
+            for name, spec in config.search_space.items()
         }
         ranker = LambdaRanker(
             config,

@@ -109,7 +109,10 @@ Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 
    con `k = 60`. Los pesos por defecto son 0,5 (popularidad), 1,0 (cosenos,
    SVD, ALS, BPR) y 0,8 (TF-IDF). Un libro que no aparece en una fuente no
-   suma ese término.
+   suma ese término. Con `--tune`, Optuna recorre un peso y una cuota relativa
+   por fuente; los intervalos son `RetrievalConfig.fusion_weight` (0,1–3, log)
+   y `fusion_quota_share` (0–1). La grilla de presupuestos sigue siendo
+   `candidate_budgets`.
 
 El orden de la fusión (`retrieval_rank`, `rrf_score`) no es el ranking final:
 solo define quién entra al ranker. Los scores y rangos de cada fuente se
@@ -139,8 +142,12 @@ El desempate del score predicho es estable por `id_libro`.
 Librerías: LightGBM ≥ 4.7, NumPy, pandas. NDCG de evaluación:
 `sklearn.metrics.ndcg_score` en `src/quelibroleo/metrics.py`.
 
-La búsqueda opcional (`main.py evaluate --tune`) usa Optuna y elige
-hiperparámetros por NDCG@20 en un fold interno, sin tocar el hold-out final.
+La búsqueda opcional (`main.py evaluate --tune`) usa Optuna. Qué parámetros
+entra a la búsqueda y con qué intervalo está en `RankerConfig.search_space` y
+en `RetrievalConfig.fusion_weight` / `fusion_quota_share`
+(`src/quelibroleo/config.py`). LambdaRank se elige por NDCG@20 en un fold
+interno, sin tocar el hold-out final. `n_estimators` y `early_stopping_rounds`
+quedan fijos.
 
 ### Features del ranker
 

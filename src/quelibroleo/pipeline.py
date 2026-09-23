@@ -313,6 +313,8 @@ def train_ranker_from_history(
             budgets=config.retrieval.candidate_budgets,
             trials_per_budget=max(5, config.ranker.optuna_trials // 2),
             rrf_k=config.retrieval.rrf_k,
+            weight_range=config.retrieval.fusion_weight,
+            quota_range=config.retrieval.fusion_quota_share,
             random_state=config.random_seed,
         )
         fusion = CandidateFusion(
