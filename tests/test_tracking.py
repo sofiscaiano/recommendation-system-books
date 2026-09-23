@@ -37,6 +37,8 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     assert stored.data.params["command"] == "evaluate"
     assert "Primera corrida" in stored.data.tags["mlflow.note.content"]
     assert stored.data.tags["git_commit"]
+    assert stored.info.run_name == stored.data.tags["run_name"]
+    assert "-evaluate-fixed-" in stored.info.run_name
 
 
 @dataclass
@@ -47,12 +49,14 @@ class _Trial:
 
 
 def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
-    from quelibroleo.tracking import optuna_callback
+    from quelibroleo.tracking import optuna_callback, study_name
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
-    study = type("Study", (), {"study_name": "fusion"})()
     with track_command("evaluate", PipelineConfig(), tune=True):
         parent = mlflow.active_run().info.run_id
+        run_name = mlflow.active_run().info.run_name
+        named = study_name("fusion-m200")
+        study = type("Study", (), {"study_name": named})()
         optuna_callback("fusion-m200")(study, _Trial(3, 0.42, {"weight__svd": 1.2}))
 
     runs = mlflow.tracking.MlflowClient().search_runs(
@@ -63,5 +67,6 @@ def test_optuna_callback_nests_trial(tmp_path, monkeypatch) -> None:
     assert len(nested) == 1
     assert nested[0].data.metrics["objective"] == 0.42
     assert nested[0].data.tags["mlflow.parentRunId"] == parent
+    assert nested[0].data.tags["study"] == f"{run_name}__fusion-m200"
     history = client.get_metric_history(parent, "fusion-m200.objective")
     assert [(point.step, point.value) for point in history] == [(3, 0.42)]

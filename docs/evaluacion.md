@@ -106,6 +106,14 @@ evaluación, pero sí se usa para no volver a recomendar ese libro. Los usuarios
 o libros sin fila en su catálogo se informan aquí; los libros ausentes no pueden
 ser candidatos.
 
+## `run.json`
+
+Nombre único de la corrida MLflow (`run_name`). El mismo valor encabeza los JSON
+y los CSV de diagnóstico de esa ejecución, y es el prefijo de los studies de
+Optuna (`{run_name}__fusion-m200`, `{run_name}__lambdarank`). Junto a
+`submission.csv` queda `submission.csv.run.json` con ese nombre: el CSV de
+entrega sigue siendo solo `id_lector,id_libro`.
+
 ## `config.json`
 
 Parámetros con los que arrancó la ejecución: semilla, presupuesto de candidatos,

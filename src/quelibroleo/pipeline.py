@@ -388,14 +388,18 @@ def train_ranker_from_history(
     if tune:
         tuned_path = Path(config.artifacts_dir) / "tuned_hyperparameters.json"
         tuned_path.parent.mkdir(parents=True, exist_ok=True)
+        from .tracking import with_run_name
+
         tuned_path.write_text(
             json.dumps(
-                {
-                    "candidate_budget": budget,
-                    "source_weights": weights,
-                    "source_quotas": quotas,
-                    "ranker": overrides,
-                },
+                with_run_name(
+                    {
+                        "candidate_budget": budget,
+                        "source_weights": weights,
+                        "source_quotas": quotas,
+                        "ranker": overrides,
+                    }
+                ),
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -550,36 +554,54 @@ def _evaluate(
     )
 
     if save_artifacts:
+        from .tracking import with_run_name, write_run_marker
+
         artifacts = Path(config.artifacts_dir)
         artifacts.mkdir(parents=True, exist_ok=True)
+        write_run_marker(artifacts)
         (artifacts / "config.json").write_text(
-            json.dumps(config.as_dict(), ensure_ascii=False, indent=2),
+            json.dumps(with_run_name(config.as_dict()), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         (artifacts / "data_quality.json").write_text(
-            json.dumps(asdict(bundle.report), ensure_ascii=False, indent=2),
+            json.dumps(with_run_name(asdict(bundle.report)), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         (artifacts / "evaluation.json").write_text(
-            json.dumps(asdict(report), ensure_ascii=False, indent=2),
+            json.dumps(with_run_name(asdict(report)), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        pd.DataFrame(trained.fold_metrics).to_csv(
+        _stamp_frame(pd.DataFrame(trained.fold_metrics)).to_csv(
             artifacts / "retrieval_folds.csv", index=False
         )
-        top20.to_csv(artifacts / "evaluation_recommendations.csv", index=False)
-        trained.ranker.feature_importance().to_csv(
+        _stamp_frame(top20).to_csv(artifacts / "evaluation_recommendations.csv", index=False)
+        _stamp_frame(trained.ranker.feature_importance()).to_csv(
             artifacts / "feature_importance.csv", index=False
         )
-        pd.DataFrame(trained.ablation_metrics).to_csv(
+        _stamp_frame(pd.DataFrame(trained.ablation_metrics)).to_csv(
             artifacts / "feature_ablations.csv", index=False
         )
-        pd.DataFrame(
-            [{"segment": name, **values} for name, values in report.segments.items()]
+        _stamp_frame(
+            pd.DataFrame(
+                [{"segment": name, **values} for name, values in report.segments.items()]
+            )
         ).to_csv(artifacts / "evaluation_segments.csv", index=False)
         joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
     _retain_latest_caches(Path(config.artifacts_dir) / "cache", "evaluate", used_caches)
     return report, trained
+
+
+def _stamp_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Agrega la corrida activa como columna, sin tocar el frame original."""
+
+    from .tracking import active_run_name
+
+    run_name = active_run_name()
+    if not run_name:
+        return frame
+    stamped = frame.copy()
+    stamped.insert(0, "run_name", run_name)
+    return stamped
 
 
 def _fill_submission(
@@ -663,12 +685,16 @@ def _submit(
         sort=False,
     )
     submission = _fill_submission(ranked, users, seen_history, popularity)
+    from .tracking import write_output_marker, write_run_marker
+
     destination = Path(output_path or config.output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     submission.to_csv(destination, index=False)
+    write_output_marker(destination)
 
     artifacts = Path(config.artifacts_dir)
     artifacts.mkdir(parents=True, exist_ok=True)
+    write_run_marker(artifacts)
     joblib.dump(trained, artifacts / "final_pipeline.joblib")
     _retain_latest_caches(Path(config.artifacts_dir) / "cache", "submit", used_caches)
     return submission

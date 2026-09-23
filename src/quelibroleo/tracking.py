@@ -6,8 +6,11 @@ import os
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
+from secrets import token_hex
 from typing import Any
 
 from .config import PipelineConfig
@@ -15,6 +18,7 @@ from .pipeline import EvaluationReport
 
 EXPERIMENT_NAME = "quelibroleo"
 _SUMMARY_ARTIFACTS = (
+    "run.json",
     "config.json",
     "evaluation.json",
     "data_quality.json",
@@ -23,7 +27,80 @@ _SUMMARY_ARTIFACTS = (
     "feature_ablations.csv",
     "evaluation_segments.csv",
     "feature_importance.csv",
+    "run.log",
 )
+_current_run_name: ContextVar[str] = ContextVar("current_run_name", default="")
+
+
+def new_run_name(command: str, *, tune: bool) -> str:
+    """Nombre único de la corrida, compartido con Optuna y las salidas."""
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    mode = "tune" if tune else "fixed"
+    return f"{stamp}-{command}-{mode}-{token_hex(2)}"
+
+
+def active_run_name() -> str:
+    """Nombre de la corrida MLflow activa, o vacío fuera de `track_command`."""
+
+    return _current_run_name.get()
+
+
+def with_run_name(payload: dict[str, Any]) -> dict[str, Any]:
+    """Antepone `run_name` a un JSON de salida cuando hay corrida activa."""
+
+    run_name = active_run_name()
+    if not run_name:
+        return payload
+    return {"run_name": run_name, **payload}
+
+
+def write_run_marker(directory: Path) -> None:
+    """Deja `run.json` en el directorio de artefactos de esta ejecución."""
+
+    import json
+
+    run_name = active_run_name()
+    if not run_name:
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "run.json").write_text(
+        json.dumps({"run_name": run_name}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_output_marker(output_path: Path) -> None:
+    """Sidecar de una salida CSV: el CSV de entrega no puede cambiar de columnas."""
+
+    import json
+
+    run_name = active_run_name()
+    if not run_name:
+        return
+    marker = output_path.with_name(output_path.name + ".run.json")
+    marker.write_text(
+        json.dumps(
+            {"run_name": run_name, "output": output_path.name},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    import mlflow
+
+    if mlflow.active_run() is not None:
+        mlflow.log_artifact(str(marker))
+
+
+def study_name(stage: str) -> str:
+    """Nombre del study de Optuna, anclado al de la corrida cuando existe."""
+
+    run_name = active_run_name()
+    if not run_name:
+        return stage
+    return f"{run_name}__{stage}"
 
 
 def _git(*args: str) -> str:
@@ -134,18 +211,27 @@ def track_command(
     mlflow.set_tracking_uri(tracking_uri())
     mlflow.set_experiment(EXPERIMENT_NAME)
     head, description = change_description(config.run_note)
-    run_name = f"{command}-{'tune' if tune else 'fixed'}"
-    with mlflow.start_run(run_name=run_name):
-        mlflow.log_params(_params(config, command=command, tune=tune))
-        mlflow.set_tags(
-            {
-                "command": command,
-                "tune": str(tune).lower(),
-                "git_commit": head,
-                "mlflow.note.content": description,
-            }
-        )
-        yield
+    run_name = new_run_name(command, tune=tune)
+    token = _current_run_name.set(run_name)
+    try:
+        with mlflow.start_run(run_name=run_name):
+            mlflow.log_params(_params(config, command=command, tune=tune))
+            mlflow.log_param("run_name", run_name)
+            mlflow.set_tags(
+                {
+                    "command": command,
+                    "tune": str(tune).lower(),
+                    "run_name": run_name,
+                    "git_commit": head,
+                    "mlflow.note.content": description,
+                }
+            )
+            import logging
+
+            logging.getLogger(__name__).info("Corrida %s", run_name)
+            yield
+    finally:
+        _current_run_name.reset(token)
 
 
 def log_evaluation(report: EvaluationReport) -> None:

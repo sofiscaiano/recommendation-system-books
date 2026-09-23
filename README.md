@@ -51,9 +51,12 @@ uv run python main.py evaluate --tune
 commit de la corrida anterior se agrega solo.
 
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
-(`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido). La corrida
-guarda la configuración, el NDCG@20 del hold-out y los JSON de diagnóstico. Con
-`--tune`, cada trial de Optuna queda anidado con su objetivo. Para comparar:
+(`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
+único (`fecha-comando-modo-sufijo`). Ese nombre queda en el tag `run_name`, en
+`artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
+cambia de columnas: el vínculo está en `submission.csv.run.json`. Con `--tune`,
+cada study de Optuna se llama `{run_name}__{etapa}` y cada trial queda anidado.
+Para comparar:
 
 ```bash
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
