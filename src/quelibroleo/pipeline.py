@@ -36,7 +36,7 @@ from .retrieval import (
     retrieve_all,
 )
 from .splits import leave_last_k, rolling_origin_folds
-from .tuning import tune_pipeline
+from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -282,15 +282,15 @@ def train_ranker_from_history(
     if len(folds) < 2:
         raise ValueError("Se requieren al menos dos folds rolling para entrenar")
 
-    maximum_budget = (
-        max(config.retrieval.candidate_budgets)
-        if tune
-        else config.retrieval.selected_budget
-    )
-    per_source = _per_source_depth(
-        maximum_budget,
-        config.retrieval.source_quotas,
-    )
+    saved = None
+    if tune:
+        maximum_budget = max(config.retrieval.candidate_budgets)
+        depth_quotas = config.retrieval.source_quotas
+    else:
+        saved, _origin = resolve_saved_or_default(config)
+        maximum_budget = saved.budget
+        depth_quotas = saved.quotas
+    per_source = _per_source_depth(maximum_budget, depth_quotas)
     materials = [
         _collect_material(
             fold.train,
@@ -318,6 +318,16 @@ def train_ranker_from_history(
         weights = selection.weights
         quotas = selection.quotas
         overrides = selection.ranker
+    elif saved is not None and saved.ranker:
+        fusion = CandidateFusion(
+            weights=saved.weights,
+            quotas=saved.quotas,
+            rrf_k=config.retrieval.rrf_k,
+        )
+        budget = saved.budget
+        weights = dict(saved.weights)
+        quotas = dict(saved.quotas)
+        overrides = dict(saved.ranker)
     else:
         fusion, budget = _fusion_from_config(config)
         weights = dict(config.retrieval.source_weights)
@@ -368,7 +378,7 @@ def train_ranker_from_history(
         LOGGER.info("LambdaRank final entrenado; se omiten ablaciones repetidas")
 
     if tune:
-        tuned_path = Path(config.artifacts_dir) / "tuned_hyperparameters.json"
+        tuned_path = tuned_hyperparameters_path(config.artifacts_dir)
         tuned_path.parent.mkdir(parents=True, exist_ok=True)
         from .tracking import with_run_name
 

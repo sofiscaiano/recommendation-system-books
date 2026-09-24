@@ -15,6 +15,7 @@ from typing import Any
 
 from .config import PipelineConfig
 from .pipeline import EvaluationReport
+from .tuning import has_saved_hyperparameters
 
 EXPERIMENT_NAME = "quelibroleo"
 _SUMMARY_ARTIFACTS = (
@@ -32,11 +33,16 @@ _SUMMARY_ARTIFACTS = (
 _current_run_name: ContextVar[str] = ContextVar("current_run_name", default="")
 
 
-def new_run_name(command: str, *, tune: bool) -> str:
+def new_run_name(command: str, *, tune: bool, saved: bool = False) -> str:
     """Nombre único de la corrida, compartido con Optuna y las salidas."""
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    mode = "tune" if tune else "fixed"
+    if tune:
+        mode = "tune"
+    elif saved:
+        mode = "tuned"
+    else:
+        mode = "fixed"
     return f"{stamp}-{command}-{mode}-{token_hex(2)}"
 
 
@@ -185,7 +191,11 @@ def track_command(
     mlflow.set_tracking_uri(tracking_uri())
     mlflow.set_experiment(EXPERIMENT_NAME)
     head = git_head()
-    run_name = new_run_name(command, tune=tune)
+    run_name = new_run_name(
+        command,
+        tune=tune,
+        saved=has_saved_hyperparameters(config.artifacts_dir),
+    )
     token = _current_run_name.set(run_name)
     try:
         with mlflow.start_run(run_name=run_name):

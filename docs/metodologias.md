@@ -150,7 +150,9 @@ NDCG@20 del top-20 de LambdaRank en el último fold rolling, entrenando con los
 folds anteriores. Ese fold también corta el early stopping. El hold-out oficial
 no entra al study. `n_estimators` y `early_stopping_rounds` quedan fijos. Un
 trial se descarta si `num_leaves` supera `2^max_depth`, o si
-`min_child_samples * num_leaves` supera las filas de entrenamiento.
+`min_child_samples * num_leaves` supera las filas de entrenamiento. El resultado
+queda en `artifacts/tuned_hyperparameters.json`. Sin `--tune`, el entrenamiento
+de la evaluación y de la entrega usa ese archivo.
 
 ### Features del ranker
 

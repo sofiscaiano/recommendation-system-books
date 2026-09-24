@@ -26,7 +26,11 @@ ArtifactsOption = Annotated[
     Path, typer.Option("--artifacts", help="Directorio de artefactos y log")
 ]
 TuneOption = Annotated[
-    bool, typer.Option("--tune", help="Ajusta fusión y LambdaRank con Optuna")
+    bool,
+    typer.Option(
+        "--tune",
+        help="Busca con Optuna. Sin este flag se reutiliza el tuneo guardado",
+    ),
 ]
 SeedOption = Annotated[int, typer.Option("--seed")]
 NoteOption = Annotated[
@@ -110,7 +114,7 @@ def main(
     seed: SeedOption = 42,
     note: NoteOption = "",
 ) -> None:
-    """Sin subcomando, corre la evaluación con los hiperparámetros fijos."""
+    """Sin subcomando, evalúa con el tuneo guardado o con los valores fijos."""
 
     if ctx.invoked_subcommand is None:
         _run(

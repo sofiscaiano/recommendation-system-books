@@ -45,13 +45,20 @@ costosa:
 
 ```bash
 uv run python main.py evaluate --tune --note "búsqueda de hiperparámetros"
+uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
+
+`evaluate --tune` escribe `artifacts/tuned_hyperparameters.json`. Las corridas
+siguientes de `evaluate` y `submit` sin `--tune` entrenan con ese archivo. Si
+no existe, usan los hiperparámetros fijos.
 
 `--note` es obligatorio. Ese texto queda como descripción de la corrida.
 
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
-único (`fecha-comando-modo-sufijo`). Ese nombre queda en el tag `run_name`, en
+único (`fecha-comando-modo-sufijo`). El modo es `tune` si busca, `tuned` si
+reutiliza el archivo guardado y `fixed` si usa los valores por defecto. Ese
+nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
 cambia de columnas: el vínculo está en `submission.csv.run.json`. Con `--tune`, el study de Optuna abre una corrida hija `{run_name}__pipeline`
 con la serie de trials en el step.
@@ -92,7 +99,8 @@ exposición long-tail y bootstrap pareado contra popularidad.
 Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
 genera en `submission.csv`. Cada corrida también deja el log en
 `artifacts/run.log`. Con `--tune`, los hiperparámetros elegidos por Optuna
-quedan en `artifacts/tuned_hyperparameters.json`. La definición de cada archivo
+quedan en `artifacts/tuned_hyperparameters.json` y las entregas posteriores los
+reutilizan. La definición de cada archivo
 y métrica está en [`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre
 se abre en modo de solo lectura.
 

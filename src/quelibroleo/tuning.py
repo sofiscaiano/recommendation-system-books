@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -10,6 +13,9 @@ import numpy as np
 from .config import PipelineConfig
 from .metrics import ndcg_at_k
 from .retrieval import CandidateFusion
+
+LOGGER = logging.getLogger(__name__)
+TUNED_HYPERPARAMETERS_FILE = "tuned_hyperparameters.json"
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,117 @@ class PipelineSelection:
     quotas: dict[str, int]
     ranker: dict[str, Any]
     study: object
+
+
+@dataclass(frozen=True)
+class TunedHyperparameters:
+    """Fusión y LambdaRank listos para entrenar sin volver a buscar."""
+
+    budget: int
+    weights: dict[str, float]
+    quotas: dict[str, int]
+    ranker: dict[str, Any]
+    run_name: str = ""
+
+
+def tuned_hyperparameters_path(artifacts_dir: Path) -> Path:
+    """Ruta del tuneo guardado por `evaluate --tune`."""
+
+    return Path(artifacts_dir) / TUNED_HYPERPARAMETERS_FILE
+
+
+def has_saved_hyperparameters(artifacts_dir: Path) -> bool:
+    """Indica si hay un tuneo previo para reutilizar."""
+
+    return tuned_hyperparameters_path(artifacts_dir).is_file()
+
+
+def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
+    """Lee el JSON de Optuna. Falla si el archivo existe pero no es válido."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"No se pudo leer {path}") from exc
+    try:
+        if not isinstance(payload, dict):
+            raise TypeError("el archivo no es un objeto")
+        budget = _as_int(payload["candidate_budget"], "candidate_budget")
+        weights = _number_map(payload["source_weights"], "source_weights")
+        quotas = {
+            key: _as_int(value, f"source_quotas.{key}")
+            for key, value in _mapping(payload["source_quotas"], "source_quotas").items()
+        }
+        ranker = {
+            key: _number(value, f"ranker.{key}")
+            for key, value in _mapping(payload["ranker"], "ranker").items()
+        }
+        run_name = payload.get("run_name", "")
+        if not isinstance(run_name, str):
+            raise TypeError("run_name debe ser texto")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Hiperparámetros inválidos en {path}") from exc
+    if budget < 1 or not weights or not quotas or not ranker:
+        raise ValueError(f"Hiperparámetros inválidos en {path}")
+    return TunedHyperparameters(
+        budget=budget,
+        weights=weights,
+        quotas=quotas,
+        ranker=ranker,
+        run_name=run_name,
+    )
+
+
+def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparameters, str]:
+    """Devuelve el tuneo guardado, o la config fija si ese archivo no existe."""
+
+    path = tuned_hyperparameters_path(config.artifacts_dir)
+    if path.is_file():
+        loaded = load_tuned_hyperparameters(path)
+        LOGGER.info(
+            "Reusando hiperparámetros de %s (corrida %s, budget=%s)",
+            path,
+            loaded.run_name or "sin nombre",
+            loaded.budget,
+        )
+        return loaded, "saved"
+    LOGGER.info("Sin %s; se usan los hiperparámetros fijos", path)
+    retrieval = config.retrieval
+    return (
+        TunedHyperparameters(
+            budget=retrieval.selected_budget,
+            weights=dict(retrieval.source_weights),
+            quotas=dict(retrieval.source_quotas),
+            ranker={},
+        ),
+        "default",
+    )
+
+
+def _mapping(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"{label} debe ser un objeto con valores")
+    return value
+
+
+def _number_map(value: Any, label: str) -> dict[str, float]:
+    return {str(key): float(_number(item, f"{label}.{key}")) for key, item in _mapping(value, label).items()}
+
+
+def _number(value: Any, label: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{label} no es numérico")
+    return value
+
+
+def _as_int(value: Any, label: str) -> int:
+    number = _number(value, label)
+    if isinstance(number, float) and not number.is_integer():
+        raise ValueError(f"{label} debe ser entero")
+    parsed = int(number)
+    if parsed < 0:
+        raise ValueError(f"{label} debe ser positivo")
+    return parsed
 
 
 def _plain(value: Any) -> Any:

@@ -35,7 +35,7 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     )
     with track_command(
         "evaluate",
-        PipelineConfig(run_note="hold-out de prueba"),
+        PipelineConfig(run_note="hold-out de prueba", artifacts_dir=tmp_path),
         tune=False,
     ):
         log_evaluation(report)
@@ -51,6 +51,22 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     assert stored.data.tags["git_commit"]
     assert stored.info.run_name == stored.data.tags["run_name"]
     assert "-evaluate-fixed-" in stored.info.run_name
+
+
+def test_run_name_marks_reused_hyperparameters(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "tuned_hyperparameters.json").write_text("{}", encoding="utf-8")
+
+    with track_command(
+        "submit",
+        PipelineConfig(run_note="reuso del tuneo", artifacts_dir=artifacts),
+        tune=False,
+    ):
+        run_name = mlflow.active_run().info.run_name
+
+    assert "-submit-tuned-" in run_name
 
 
 @dataclass

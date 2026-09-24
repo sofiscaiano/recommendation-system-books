@@ -125,8 +125,9 @@ Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
 
 Solo aparece si la corrida usó `--tune`. Guarda el presupuesto de candidatos,
 los pesos y las cuotas de fusión, y los hiperparámetros de LambdaRank elegidos
-por Optuna. `submit` no relee este archivo: vuelve a usar la config fija, salvo
-que también se le pase `--tune`.
+por Optuna. `evaluate` y `submit` sin `--tune` leen este archivo y entrenan con
+esos valores. Si no existe, usan la config fija de `PipelineConfig`. Otra
+corrida con `--tune` vuelve a buscar y reemplaza el archivo.
 
 ## `run.log`
 
