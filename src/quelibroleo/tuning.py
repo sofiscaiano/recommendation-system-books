@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import PipelineConfig
+from .config import PipelineConfig, search_ranges
 from .metrics import ndcg_at_k
 from .retrieval import CandidateFusion
 
@@ -180,14 +180,16 @@ def tune_pipeline(
         raise ValueError("No hay fuentes para ajustar")
 
     def objective(trial: Any) -> float:
-        cutoff = int(retrieval.rrf_cutoff_search.suggest(trial, "rrf_cutoff"))
+        cutoff = int(retrieval.search.rrf_cutoff.suggest(trial, "rrf_cutoff"))
         weights = {
-            source: float(retrieval.fusion_weight.suggest(trial, f"weight__{source}"))
+            source: float(
+                retrieval.search.source_weight.suggest(trial, f"weight__{source}")
+            )
             for source in sources
         }
         parameters = {
             name: spec.suggest(trial, name)
-            for name, spec in config.ranker.search_space.items()
+            for name, spec in search_ranges(config.ranker.search).items()
         }
         if _leaves_are_impossible(parameters, n_rows=None):
             raise optuna.TrialPruned()

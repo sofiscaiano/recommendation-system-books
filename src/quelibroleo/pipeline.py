@@ -282,7 +282,7 @@ def train_ranker_from_history(
         saved, hyperparameters_origin = resolve_saved_or_default(config)
         hyperparameters_run_name = saved.run_name if hyperparameters_origin == "saved" else ""
     depth_cutoff = (
-        int(config.retrieval.rrf_cutoff_search.high)
+        int(config.retrieval.search.rrf_cutoff.high)
         if tune
         else saved.rrf_cutoff
     )
@@ -698,7 +698,7 @@ def _submit(
 
 def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:
     ranker_values = asdict(trained.ranker.config)
-    ranker_values.pop("search_space", None)
+    ranker_values.pop("search", None)
     ranker_values.update(trained.ranker.overrides)
     return {
         "rrf_cutoff": trained.rrf_cutoff,

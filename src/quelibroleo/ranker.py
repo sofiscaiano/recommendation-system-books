@@ -43,7 +43,7 @@ class LambdaRanker:
     def _parameters(self) -> dict[str, Any]:
         values = asdict(self.config)
         values.pop("early_stopping_rounds")
-        values.pop("search_space")
+        values.pop("search")
         values.update(self.overrides)
         return {
             "objective": "lambdarank",

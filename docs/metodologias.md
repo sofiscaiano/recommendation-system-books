@@ -129,9 +129,9 @@ evidencia, y pelearía con el peso por la misma decisión.
    `id_libro`). No recorta las listas de cada fuente. Un corte mayor es un
    prefijo más largo del mismo ranking: solo agrega candidatos. El defecto es
    200. Con `--tune`, Optuna recorre C como entero en escala logarítmica entre
-   100 y 1.000 (`rrf_cutoff_search`) y un peso por fuente
-   (`fusion_weight`, 0,1–3, log). La escala logarítmica sigue el rendimiento
-   decreciente de agrandar el conjunto.
+   100 y 1.000 (`RetrievalSearch.rrf_cutoff`) y un peso por fuente
+   (`RetrievalSearch.source_weight`, 0,1–3, log). La escala logarítmica sigue
+   el rendimiento decreciente de agrandar el conjunto.
 
 El orden de la fusión (`retrieval_rank`, `rrf_score`) no es el ranking final:
 solo define quién entra al ranker. Los scores y rangos de cada fuente se
@@ -163,7 +163,7 @@ Librerías: LightGBM ≥ 4.7, NumPy, pandas. NDCG de evaluación:
 
 La búsqueda opcional (`main.py evaluate --tune`) es un solo study de Optuna,
 `PipelineConfig.optuna_trials` trials. Recorre juntos el corte de RRF, un peso
-por fuente y `RankerConfig.search_space`. El objetivo es el NDCG@20 del top-20
+por fuente y `RankerSearch`. El objetivo es el NDCG@20 del top-20
 de LambdaRank en el último fold rolling, entrenando con los folds anteriores.
 Ese fold también corta el early stopping. El hold-out oficial no entra al
 study. `n_estimators`, `early_stopping_rounds` y `rrf_k` quedan fijos. La

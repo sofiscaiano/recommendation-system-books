@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,12 @@ class SearchRange:
         return trial.suggest_float(name, self.low, self.high, log=self.log)
 
 
+def search_ranges(search: Any) -> dict[str, SearchRange]:
+    """Campos de un bloque `search`, en el orden de la clase."""
+
+    return {item.name: getattr(search, item.name) for item in fields(search)}
+
+
 @dataclass(frozen=True)
 class SplitConfig:
     """Parámetros del holdout y del backtesting temporal."""
@@ -33,13 +39,31 @@ class SplitConfig:
 
 
 @dataclass(frozen=True)
-class RetrievalConfig:
-    """Parámetros comunes de las fuentes de candidatos."""
+class RetrievalSearch:
+    """Hiperparámetros de fusión que Optuna recorre."""
 
-    rrf_cutoff: int = 200
-    rrf_cutoff_search: SearchRange = field(
+    rrf_cutoff: SearchRange = field(
         default_factory=lambda: SearchRange(100, 1000, log=True, integer=True)
     )
+    source_weight: SearchRange = field(
+        default_factory=lambda: SearchRange(0.1, 3.0, log=True)
+    )
+
+    def __post_init__(self) -> None:
+        low = int(self.rrf_cutoff.low)
+        high = int(self.rrf_cutoff.high)
+        if low < 1 or low > high:
+            raise ValueError("la búsqueda de rrf_cutoff debe ser un intervalo positivo")
+        if self.source_weight.low < 0:
+            raise ValueError("la búsqueda de source_weight no admite pesos negativos")
+
+
+@dataclass(frozen=True)
+class RetrievalConfig:
+    """Fuentes de candidatos. Sin `--tune` se usan estos valores; Optuna solo toca `search`."""
+
+    rrf_cutoff: int = 200
+    rrf_k: float = 60.0
     recency_half_life_days: float = 365.0
     item_knn_mode: tuple[str, ...] = ("occurrence", "adjusted")
     svd_factors: int = 64
@@ -47,10 +71,6 @@ class RetrievalConfig:
     implicit_factors: int = 64
     implicit_iterations: int = 20
     tfidf_max_features: int = 60_000
-    rrf_k: float = 60.0
-    fusion_weight: SearchRange = field(
-        default_factory=lambda: SearchRange(0.1, 3.0, log=True)
-    )
     source_weights: dict[str, float] = field(
         default_factory=lambda: {
             "popularidad": 0.5,
@@ -62,21 +82,46 @@ class RetrievalConfig:
             "tfidf": 0.8,
         }
     )
+    search: RetrievalSearch = field(default_factory=RetrievalSearch)
 
     def __post_init__(self) -> None:
-        low = int(self.rrf_cutoff_search.low)
-        high = int(self.rrf_cutoff_search.high)
         if self.rrf_k <= 0:
             raise ValueError("rrf_k debe ser positivo")
         if self.rrf_cutoff < 1:
             raise ValueError("rrf_cutoff debe ser positivo")
-        if low < 1 or low > high:
-            raise ValueError("rrf_cutoff_search debe ser un intervalo positivo")
+
+
+@dataclass(frozen=True)
+class RankerSearch:
+    """Hiperparámetros de LambdaRank que Optuna recorre."""
+
+    learning_rate: SearchRange = field(
+        default_factory=lambda: SearchRange(0.015, 0.12, log=True)
+    )
+    num_leaves: SearchRange = field(
+        default_factory=lambda: SearchRange(15, 127, log=True, integer=True)
+    )
+    max_depth: SearchRange = field(
+        default_factory=lambda: SearchRange(4, 12, integer=True)
+    )
+    min_child_samples: SearchRange = field(
+        default_factory=lambda: SearchRange(10, 100, integer=True)
+    )
+    subsample: SearchRange = field(default_factory=lambda: SearchRange(0.65, 1.0))
+    colsample_bytree: SearchRange = field(
+        default_factory=lambda: SearchRange(0.6, 1.0)
+    )
+    reg_alpha: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-8, 10.0, log=True)
+    )
+    reg_lambda: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-8, 20.0, log=True)
+    )
 
 
 @dataclass(frozen=True)
 class RankerConfig:
-    """Parámetros de LambdaRank y su búsqueda."""
+    """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna."""
 
     n_estimators: int = 200
     learning_rate: float = 0.04
@@ -88,18 +133,7 @@ class RankerConfig:
     reg_alpha: float = 0.0
     reg_lambda: float = 1.0
     early_stopping_rounds: int = 30
-    search_space: dict[str, SearchRange] = field(
-        default_factory=lambda: {
-            "learning_rate": SearchRange(0.015, 0.12, log=True),
-            "num_leaves": SearchRange(15, 127, log=True, integer=True),
-            "max_depth": SearchRange(4, 12, integer=True),
-            "min_child_samples": SearchRange(10, 100, integer=True),
-            "subsample": SearchRange(0.65, 1.0),
-            "colsample_bytree": SearchRange(0.6, 1.0),
-            "reg_alpha": SearchRange(1e-8, 10.0, log=True),
-            "reg_lambda": SearchRange(1e-8, 20.0, log=True),
-        }
-    )
+    search: RankerSearch = field(default_factory=RankerSearch)
 
 
 @dataclass(frozen=True)
