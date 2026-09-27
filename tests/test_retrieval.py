@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from quelibroleo.baselines import PopularityRecommender
-from quelibroleo.retrieval import CandidateFusion, ItemCosineRetriever
+from quelibroleo.retrieval import CandidateFusion, ItemCosineRetriever, per_source_depth
 
 
 def tiny_data() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -91,6 +91,19 @@ def test_weight_scale_does_not_change_the_fused_ranking() -> None:
     scaled = CandidateFusion(weights={"a": 10.0, "b": 20.0}).fuse(candidates, 3)
 
     assert scaled.candidates["id_libro"].tolist() == base.candidates["id_libro"].tolist()
+
+
+def test_per_source_depth_keeps_the_tail_out_of_the_fused_head() -> None:
+    cutoff = 200
+    k = 60.0
+    n_sources = 7
+    depth = per_source_depth(cutoff, rrf_k=k, n_sources=n_sources)
+
+    assert depth == 1760
+    assert per_source_depth(1000, rrf_k=k, n_sources=n_sources) == 7360
+    marginal = (1.0 / n_sources) / (k + cutoff)
+    tail = 1.0 / (k + depth + 1)
+    assert marginal > tail
 
 
 def test_rrf_cutoff_follows_fused_score_not_source_slots() -> None:

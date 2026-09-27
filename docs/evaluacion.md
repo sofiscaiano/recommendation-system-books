@@ -26,7 +26,7 @@ Resultado oficial del sistema completo contra el baseline de popularidad.
 | `long_tail_exposure_at_20` | Proporción de posiciones del top-20 ocupadas por libros de cola larga. La cola incluye los libros cuyo conteo está en el 80 % inferior de popularidad. |
 | `paired_delta` | Diferencia de NDCG@20 entre el modelo y la popularidad para el mismo usuario. `mean` es el promedio; `lower` y `upper` son el intervalo bootstrap del 95 % con 2.000 remuestreos. |
 | `segments` | Métricas por grupo de usuarios. Cada grupo incluye NDCG@20, Recall@20 del ranking, recall de retrieval, cobertura y exposición long-tail. |
-| `candidate_budget` | Corte del ranking de RRF: cuántos candidatos entran al ranker. Es un prefijo del ranking fusionado sobre la ventana de 1.000. |
+| `candidate_budget` | Corte del ranking ya fusionado: cuántos candidatos entran al ranker. Cada fuente se lee más profundo que este corte. |
 | `evaluation_users` | Lectores incluidos en el holdout. |
 
 Los segmentos `activity_q1` a `activity_q4` dividen a los usuarios evaluados en
@@ -135,7 +135,7 @@ la última. La carpeta también queda como artefacto de esa corrida en MLflow.
 
 ## `config.json`
 
-Parámetros con los que arrancó la ejecución: semilla, ventana y corte de RRF,
+Parámetros con los que arrancó la ejecución: semilla, corte de RRF,
 pesos y configuración de LightGBM. Son los valores de `PipelineConfig`.
 Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
 `tuned_hyperparameters.json`.

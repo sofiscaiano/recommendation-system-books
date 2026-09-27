@@ -601,6 +601,25 @@ def retrieve_all(
     ).reset_index(drop=True)
 
 
+def per_source_depth(cutoff: int, *, rrf_k: float, n_sources: int) -> int:
+    """Profundidad de cada lista para no alterar el top fusionado.
+
+    Con pesos parejos, los `cutoff` primeros de una fuente superan a un libro
+    que todas las fuentes recién rankean después de esta profundidad. Más atrás
+    el tail no entra al corte del ranking mergeado. El catálogo completo no
+    hace falta.
+    """
+
+    if cutoff < 1:
+        raise ValueError("cutoff debe ser positivo")
+    if rrf_k <= 0:
+        raise ValueError("rrf_k debe ser positivo")
+    if n_sources < 1:
+        raise ValueError("n_sources debe ser positivo")
+    weight = 1.0 / n_sources
+    return int(np.ceil((cutoff + rrf_k) / weight - rrf_k))
+
+
 def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
     """Deja pesos relativos que suman 1.
 

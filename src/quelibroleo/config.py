@@ -36,7 +36,6 @@ class SplitConfig:
 class RetrievalConfig:
     """Parámetros comunes de las fuentes de candidatos."""
 
-    rrf_window: int = 1000
     rrf_cutoff: int = 200
     rrf_cutoff_search: SearchRange = field(
         default_factory=lambda: SearchRange(100, 1000, log=True, integer=True)
@@ -69,12 +68,10 @@ class RetrievalConfig:
         high = int(self.rrf_cutoff_search.high)
         if self.rrf_k <= 0:
             raise ValueError("rrf_k debe ser positivo")
-        if self.rrf_window < 1:
-            raise ValueError("rrf_window debe ser positivo")
-        if not 1 <= self.rrf_cutoff <= self.rrf_window:
-            raise ValueError("rrf_cutoff debe estar entre 1 y rrf_window")
-        if low < 1 or high > self.rrf_window or low > high:
-            raise ValueError("rrf_cutoff_search debe caer dentro de 1..rrf_window")
+        if self.rrf_cutoff < 1:
+            raise ValueError("rrf_cutoff debe ser positivo")
+        if low < 1 or low > high:
+            raise ValueError("rrf_cutoff_search debe ser un intervalo positivo")
 
 
 @dataclass(frozen=True)

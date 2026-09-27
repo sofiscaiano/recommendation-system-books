@@ -33,6 +33,7 @@ from .retrieval import (
     FusionResult,
     build_default_retrievers,
     fit_retrievers,
+    per_source_depth,
     retrieve_all,
 )
 from .splits import leave_last_k, rolling_origin_folds
@@ -120,7 +121,7 @@ def _collect_material(
             ).encode()
         )
         fingerprint.update(
-            repr(("retrieval-cache-v3", config.retrieval, tuple(users), per_source)).encode()
+            repr(("retrieval-cache-v4", config.retrieval, tuple(users), per_source)).encode()
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"fold_{fold}_{fingerprint.hexdigest()[:16]}.joblib"
@@ -280,7 +281,16 @@ def train_ranker_from_history(
     else:
         saved, hyperparameters_origin = resolve_saved_or_default(config)
         hyperparameters_run_name = saved.run_name if hyperparameters_origin == "saved" else ""
-    per_source = config.retrieval.rrf_window
+    depth_cutoff = (
+        int(config.retrieval.rrf_cutoff_search.high)
+        if tune
+        else saved.rrf_cutoff
+    )
+    per_source = per_source_depth(
+        depth_cutoff,
+        rrf_k=config.retrieval.rrf_k,
+        n_sources=len(_make_retrievers(config)),
+    )
     materials = [
         _collect_material(
             fold.train,
@@ -419,7 +429,11 @@ def _score_history(
         books=books,
         config=config,
         fold=999,
-        per_source=config.retrieval.rrf_window,
+        per_source=per_source_depth(
+            trained.rrf_cutoff,
+            rrf_k=config.retrieval.rrf_k,
+            n_sources=len(_make_retrievers(config)),
+        ),
         cache_dir=Path(config.artifacts_dir) / "cache",
         used_caches=used_caches,
     )

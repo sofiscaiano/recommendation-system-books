@@ -103,9 +103,15 @@ No hay cupos por fuente. El ranker de la etapa siguiente ya puede bajar un
 candidato débil; un cupo mínimo lo metería igual, desplazando a otro con mejor
 evidencia, y pelearía con el peso por la misma decisión.
 
-1. Cada fuente aporta su ranking hasta una ventana fija de 1.000
-   (`rrf_window`). La ventana no se busca: es la profundidad a la que se arma
-   el ranking de RRF y tiene que cubrir el corte más grande.
+1. Cada fuente aporta un ranking más largo que el corte final. No se emite el
+   catálogo entero (hay unos 48.000 libros con alguna interacción): un puesto
+   tan atrás no puede entrar al top mergeado. La profundidad es
+   `(C + k) * n_fuentes - k`, con pesos parejos. Así, los C primeros de una
+   sola fuente le ganan a un libro que en todas las fuentes aparece recién
+   después de ese puesto. Con 7 fuentes y `k = 60`, un corte de 200 lee 1.760
+   por fuente; si la búsqueda lleva el corte a 1.000, lee 7.360. Durante el
+   study se lee una sola vez, a la profundidad del corte más grande, y cada
+   trial corta el ranking ya fusionado.
 2. Esos rankings se combinan con Reciprocal Rank Fusion ponderado (Cormack,
    Clarke y Buettcher, 2009):
 
@@ -118,8 +124,9 @@ evidencia, y pelearía con el peso por la misma decisión.
    constante no cambia el orden, y un árbol tampoco parte distinto `rrf_score`
    si solo cambia la escala. Los pesos por defecto, antes de normalizar, son
    0,5 (popularidad), 1,0 (cosenos, SVD, ALS, BPR) y 0,8 (TF-IDF).
-3. El corte `rrf_cutoff` se queda con los primeros C libros de ese ranking
-   (`rrf_score` descendente, desempate por `id_libro`). Un corte mayor es un
+3. El corte `rrf_cutoff` se aplica solo después del merge: se queda con los
+   primeros C libros de ese ranking (`rrf_score` descendente, desempate por
+   `id_libro`). No recorta las listas de cada fuente. Un corte mayor es un
    prefijo más largo del mismo ranking: solo agrega candidatos. El defecto es
    200. Con `--tune`, Optuna recorre C como entero en escala logarítmica entre
    100 y 1.000 (`rrf_cutoff_search`) y un peso por fuente
@@ -159,8 +166,9 @@ La búsqueda opcional (`main.py evaluate --tune`) es un solo study de Optuna,
 por fuente y `RankerConfig.search_space`. El objetivo es el NDCG@20 del top-20
 de LambdaRank en el último fold rolling, entrenando con los folds anteriores.
 Ese fold también corta el early stopping. El hold-out oficial no entra al
-study. `n_estimators`, `early_stopping_rounds`, `rrf_k` y la ventana de
-retrieval quedan fijos. Un trial se descarta si `num_leaves` supera
+study. `n_estimators`, `early_stopping_rounds` y `rrf_k` quedan fijos. La
+profundidad de cada fuente sale del corte, de `k` y de la cantidad de fuentes;
+no es otro hiperparámetro. Un trial se descarta si `num_leaves` supera
 `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de
 entrenamiento. El resultado queda en `artifacts/tuned_hyperparameters.json`,
 con los pesos ya normalizados. Sin `--tune`, el entrenamiento de la evaluación

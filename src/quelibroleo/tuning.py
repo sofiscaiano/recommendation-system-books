@@ -92,11 +92,6 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
     path = tuned_hyperparameters_path(config.artifacts_dir)
     if path.is_file():
         loaded = load_tuned_hyperparameters(path)
-        if loaded.rrf_cutoff > config.retrieval.rrf_window:
-            raise ValueError(
-                f"El corte guardado ({loaded.rrf_cutoff}) supera la ventana RRF "
-                f"({config.retrieval.rrf_window})"
-            )
         LOGGER.info(
             "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s)",
             path,
