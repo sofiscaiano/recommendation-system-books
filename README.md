@@ -87,8 +87,9 @@ El detalle de cada método, pesos y librerías está en
 [`docs/metodologias.md`](docs/metodologias.md). El sistema tiene dos etapas:
 
 1. **Retrieval**: popularidad, dos variantes item-item coseno, SVD explícito,
-   ALS/BPR ponderados y perfil TF-IDF. Las fuentes se combinan con cuotas y
-   Reciprocal Rank Fusion para producir entre 100 y 1.000 candidatos.
+   ALS/BPR ponderados y perfil TF-IDF. Las fuentes se combinan con Reciprocal
+   Rank Fusion ponderado. Un corte de ese ranking entrega los candidatos al
+   ranker (por defecto 200; entre 100 y 1.000 si se busca).
 2. **Ranking**: LightGBM LambdaRank ordena los candidatos con relevancia lineal
    0–10 y señales colaborativas, de contenido y secuenciales.
 

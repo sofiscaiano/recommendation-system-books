@@ -601,6 +601,27 @@ def retrieve_all(
     ).reset_index(drop=True)
 
 
+def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
+    """Deja pesos relativos que suman 1.
+
+    El orden de RRF no cambia si se escalan todos los pesos: solo importan
+    las proporciones. Un peso nulo apaga esa fuente.
+    """
+
+    if not weights:
+        raise ValueError("Se requiere al menos un peso")
+    cleaned: dict[str, float] = {}
+    for source, weight in weights.items():
+        value = float(weight)
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"El peso de {source} debe ser finito y no negativo")
+        cleaned[str(source)] = value
+    total = sum(cleaned.values())
+    if total <= 0:
+        raise ValueError("Al menos un peso debe ser positivo")
+    return {source: value / total for source, value in cleaned.items()}
+
+
 @dataclass(frozen=True)
 class FusionResult:
     """Candidatos fusionados y rankings fuente conservados."""
@@ -610,53 +631,26 @@ class FusionResult:
 
 
 class CandidateFusion:
-    """Cuotas mínimas por fuente y relleno con RRF ponderado."""
+    """RRF ponderado truncado por un corte del ranking fusionado."""
 
     def __init__(
         self,
         *,
         weights: dict[str, float],
-        quotas: dict[str, int],
         rrf_k: float = 60.0,
     ) -> None:
         if rrf_k <= 0:
             raise ValueError("rrf_k debe ser positivo")
-        self.weights = weights
-        self.quotas = quotas
+        self.weights = _normalize_weights(weights)
         self.rrf_k = rrf_k
 
-    def _scaled_quotas(self, budget: int) -> dict[str, int]:
-        active = {
-            source: max(0, int(quota))
-            for source, quota in self.quotas.items()
-            if quota > 0
-        }
-        total = sum(active.values())
-        if total <= budget:
-            return active
-        scaled = {
-            source: int(np.floor(quota * budget / total))
-            for source, quota in active.items()
-        }
-        remainder = budget - sum(scaled.values())
-        priority = sorted(
-            active,
-            key=lambda source: (
-                -(active[source] * budget / total - scaled[source]),
-                source,
-            ),
+    def fuse(self, candidates: pd.DataFrame, cutoff: int) -> FusionResult:
+        if cutoff < 1:
+            raise ValueError("cutoff debe ser positivo")
+        empty = pd.DataFrame(
+            columns=[USER_COL, ITEM_COL, "rrf_score", "retrieval_rank"]
         )
-        for source in priority[:remainder]:
-            scaled[source] += 1
-        return scaled
-
-    def fuse(self, candidates: pd.DataFrame, budget: int) -> FusionResult:
-        if budget < 1:
-            raise ValueError("budget debe ser positivo")
         if candidates.empty:
-            empty = pd.DataFrame(
-                columns=[USER_COL, ITEM_COL, "rrf_score", "retrieval_rank"]
-            )
             return FusionResult(empty, candidates.copy())
 
         required = set(CANDIDATE_COLUMNS)
@@ -664,56 +658,38 @@ class CandidateFusion:
         if missing:
             raise ValueError(f"Faltan columnas de candidatos: {sorted(missing)}")
 
-        long = candidates.drop_duplicates(
-            [USER_COL, ITEM_COL, "source"], keep="first"
-        ).copy()
-        source_weights = long["source"].map(self.weights).fillna(1.0)
-        long["rrf_component"] = source_weights / (
+        long = (
+            candidates.sort_values(
+                [USER_COL, "source", "rank", ITEM_COL], kind="mergesort"
+            )
+            .drop_duplicates([USER_COL, ITEM_COL, "source"], keep="first")
+            .copy()
+        )
+        long["weight"] = long["source"].map(self.weights).fillna(0.0)
+        long = long.loc[long["weight"] > 0].copy()
+        if long.empty:
+            return FusionResult(empty, long.drop(columns="weight"))
+
+        long["rrf_component"] = long["weight"] / (
             self.rrf_k + long["rank"].astype(float)
         )
         aggregate = (
             long.groupby([USER_COL, ITEM_COL], as_index=False)["rrf_component"]
             .sum()
             .rename(columns={"rrf_component": "rrf_score"})
-        )
-        quotas = self._scaled_quotas(budget)
-        output: list[pd.DataFrame] = []
-
-        for user, user_long in long.groupby(USER_COL, sort=False):
-            selected: set[str] = set()
-            for source in sorted(quotas):
-                quota = quotas[source]
-                source_items = user_long[user_long["source"] == source].nsmallest(
-                    quota, "rank"
-                )
-                for item in source_items[ITEM_COL]:
-                    if len(selected) == budget:
-                        break
-                    selected.add(item)
-
-            user_aggregate = aggregate[aggregate[USER_COL] == user].sort_values(
-                ["rrf_score", ITEM_COL],
-                ascending=[False, True],
+            .sort_values(
+                [USER_COL, "rrf_score", ITEM_COL],
+                ascending=[True, False, True],
                 kind="mergesort",
             )
-            for item in user_aggregate[ITEM_COL]:
-                if len(selected) == budget:
-                    break
-                selected.add(item)
-
-            fused = user_aggregate[user_aggregate[ITEM_COL].isin(selected)].copy()
-            fused = fused.sort_values(
-                ["rrf_score", ITEM_COL],
-                ascending=[False, True],
-                kind="mergesort",
-            ).head(budget)
-            fused["retrieval_rank"] = np.arange(1, len(fused) + 1)
-            output.append(fused)
-
-        fused_candidates = pd.concat(output, ignore_index=True)
+        )
+        aggregate["retrieval_rank"] = (
+            aggregate.groupby(USER_COL, sort=False).cumcount() + 1
+        )
+        fused = aggregate.loc[aggregate["retrieval_rank"] <= cutoff]
         return FusionResult(
-            candidates=fused_candidates[
+            candidates=fused[
                 [USER_COL, ITEM_COL, "rrf_score", "retrieval_rank"]
-            ],
-            source_candidates=long.drop(columns="rrf_component"),
+            ].reset_index(drop=True),
+            source_candidates=long.drop(columns=["weight", "rrf_component"]),
         )

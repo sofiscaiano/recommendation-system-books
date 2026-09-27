@@ -77,8 +77,7 @@ class TrainedPipeline:
 
     ranker: LambdaRanker
     weights: dict[str, float]
-    quotas: dict[str, int]
-    budget: int
+    rrf_cutoff: int
     fold_metrics: list[dict[str, float]]
     ablation_metrics: list[dict[str, object]]
 
@@ -94,17 +93,6 @@ def _make_retrievers(config: PipelineConfig) -> list[Any]:
         half_life_days=retrieval.recency_half_life_days,
         tfidf_max_features=retrieval.tfidf_max_features,
     )
-
-
-def _per_source_depth(
-    budget: int,
-    quotas: dict[str, int],
-    source_count: int = 7,
-) -> int:
-    """Sobre-recupera por fuente sin multiplicar M por todas las fuentes."""
-
-    fair_share = int(np.ceil(2.0 * budget / source_count))
-    return max(fair_share, max(quotas.values(), default=0))
 
 
 def _collect_material(
@@ -130,7 +118,7 @@ def _collect_material(
             ).encode()
         )
         fingerprint.update(
-            repr(("retrieval-cache-v2", config.retrieval, tuple(users), per_source)).encode()
+            repr(("retrieval-cache-v3", config.retrieval, tuple(users), per_source)).encode()
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"fold_{fold}_{fingerprint.hexdigest()[:16]}.joblib"
@@ -217,19 +205,18 @@ def _fusion_from_config(config: PipelineConfig) -> tuple[CandidateFusion, int]:
     return (
         CandidateFusion(
             weights=retrieval.source_weights,
-            quotas=retrieval.source_quotas,
             rrf_k=retrieval.rrf_k,
         ),
-        retrieval.selected_budget,
+        retrieval.rrf_cutoff,
     )
 
 
 def _material_to_features(
     material: FoldMaterial,
     fusion: CandidateFusion,
-    budget: int,
+    cutoff: int,
 ) -> tuple[FeatureSet, FusionResult]:
-    fused = fusion.fuse(material.source_candidates, budget)
+    fused = fusion.fuse(material.source_candidates, cutoff)
     features = material.feature_builder.transform(
         fused.candidates,
         fused.source_candidates,
@@ -282,15 +269,8 @@ def train_ranker_from_history(
     if len(folds) < 2:
         raise ValueError("Se requieren al menos dos folds rolling para entrenar")
 
-    saved = None
-    if tune:
-        maximum_budget = max(config.retrieval.candidate_budgets)
-        depth_quotas = config.retrieval.source_quotas
-    else:
-        saved, _origin = resolve_saved_or_default(config)
-        maximum_budget = saved.budget
-        depth_quotas = saved.quotas
-    per_source = _per_source_depth(maximum_budget, depth_quotas)
+    saved = None if tune else resolve_saved_or_default(config)[0]
+    per_source = config.retrieval.rrf_window
     materials = [
         _collect_material(
             fold.train,
@@ -311,29 +291,22 @@ def train_ranker_from_history(
         selection = tune_pipeline(materials, config)
         fusion = CandidateFusion(
             weights=selection.weights,
-            quotas=selection.quotas,
             rrf_k=config.retrieval.rrf_k,
         )
-        budget = selection.budget
-        weights = selection.weights
-        quotas = selection.quotas
+        cutoff = selection.rrf_cutoff
         overrides = selection.ranker
     elif saved is not None and saved.ranker:
         fusion = CandidateFusion(
             weights=saved.weights,
-            quotas=saved.quotas,
             rrf_k=config.retrieval.rrf_k,
         )
-        budget = saved.budget
-        weights = dict(saved.weights)
-        quotas = dict(saved.quotas)
+        cutoff = saved.rrf_cutoff
         overrides = dict(saved.ranker)
     else:
-        fusion, budget = _fusion_from_config(config)
-        weights = dict(config.retrieval.source_weights)
-        quotas = dict(config.retrieval.source_quotas)
+        fusion, cutoff = _fusion_from_config(config)
+    weights = dict(fusion.weights)
 
-    built = [_material_to_features(material, fusion, budget) for material in materials]
+    built = [_material_to_features(material, fusion, cutoff) for material in materials]
     LOGGER.info("Candidatos fusionados; entrenando LambdaRank")
     feature_sets = [features for features, _ in built]
     train_set = _concat_feature_sets(feature_sets[:-1])
@@ -358,7 +331,7 @@ def train_ranker_from_history(
             without_source = validation_sources[
                 validation_sources["source"] != source
             ]
-            ablated_candidates = fusion.fuse(without_source, budget).candidates
+            ablated_candidates = fusion.fuse(without_source, cutoff).candidates
             metrics = retrieval_metrics(
                 ablated_candidates,
                 materials[-1].target,
@@ -386,9 +359,8 @@ def train_ranker_from_history(
             json.dumps(
                 with_run_name(
                     {
-                        "candidate_budget": budget,
+                        "rrf_cutoff": cutoff,
                         "source_weights": weights,
-                        "source_quotas": quotas,
                         "ranker": overrides,
                     }
                 ),
@@ -414,8 +386,7 @@ def train_ranker_from_history(
     return TrainedPipeline(
         ranker=ranker,
         weights=weights,
-        quotas=quotas,
-        budget=budget,
+        rrf_cutoff=cutoff,
         fold_metrics=fold_metrics,
         ablation_metrics=ablation_metrics,
     )
@@ -436,16 +407,15 @@ def _score_history(
         books=books,
         config=config,
         fold=999,
-        per_source=_per_source_depth(trained.budget, trained.quotas),
+        per_source=config.retrieval.rrf_window,
         cache_dir=Path(config.artifacts_dir) / "cache",
         used_caches=used_caches,
     )
     fusion = CandidateFusion(
         weights=trained.weights,
-        quotas=trained.quotas,
         rrf_k=config.retrieval.rrf_k,
     )
-    fused = fusion.fuse(material.source_candidates, trained.budget)
+    fused = fusion.fuse(material.source_candidates, trained.rrf_cutoff)
     features = material.feature_builder.transform(
         fused.candidates,
         fused.source_candidates,
@@ -541,7 +511,7 @@ def _evaluate(
             outer.train,
             eligible_items,
         ),
-        candidate_budget=trained.budget,
+        candidate_budget=trained.rrf_cutoff,
         evaluation_users=len(outer.evaluation_users),
     )
 

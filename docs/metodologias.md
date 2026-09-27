@@ -1,9 +1,9 @@
 # Metodologías de retrieval y ranking
 
-El recomendador es un pipeline de dos etapas. **Retrieval** propone un conjunto
-chico de candidatos por lector (por defecto 200, configurable entre 100 y
-1.000). **Ranking** los ordena y deja el top-20. Los libros ya leídos se
-excluyen en ambas etapas.
+El recomendador es un pipeline de dos etapas. **Retrieval** arma un ranking
+fusionado y se queda con un prefijo (por defecto 200 libros; la búsqueda mueve
+ese corte entre 100 y 1.000). **Ranking** los ordena y deja el top-20. Los
+libros ya leídos se excluyen en ambas etapas.
 
 El entrenamiento usa solo el historial anterior al corte temporal. La
 evaluación reserva las últimas 20 interacciones de cada lector (ver
@@ -95,25 +95,36 @@ normalizada a L2. El score es el coseno entre ese perfil y cada libro.
 
 Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 
-### Fusión: cuotas y Reciprocal Rank Fusion
+### Fusión: Reciprocal Rank Fusion y un corte
 
 `CandidateFusion`.
 
-1. Cada fuente aporta una cuota mínima de sus mejores rangos (por defecto, para
-   un presupuesto de 200: popularidad 25, cada coseno 60, SVD 75, ALS 75,
-   BPR 75, TF-IDF 60). Si la suma supera el presupuesto, las cuotas se escalan
-   en proporción.
-2. El resto del presupuesto se llena con Reciprocal Rank Fusion ponderado:
+No hay cupos por fuente. El ranker de la etapa siguiente ya puede bajar un
+candidato débil; un cupo mínimo lo metería igual, desplazando a otro con mejor
+evidencia, y pelearía con el peso por la misma decisión.
 
-   `score(u, i) = Σ_s  peso_s / (k + rango_s(u, i))`
+1. Cada fuente aporta su ranking hasta una ventana fija de 1.000
+   (`rrf_window`). La ventana no se busca: es la profundidad a la que se arma
+   el ranking de RRF y tiene que cubrir el corte más grande.
+2. Esos rankings se combinan con Reciprocal Rank Fusion ponderado (Cormack,
+   Clarke y Buettcher, 2009):
 
-   con `k = 60`. Los pesos por defecto son 0,5 (popularidad), 1,0 (cosenos,
-   SVD, ALS, BPR) y 0,8 (TF-IDF). Un libro que no aparece en una fuente no
-   suma ese término. Con `--tune`, un único study de Optuna recorre el
-   presupuesto (`candidate_budgets`), un peso y una cuota relativa por fuente.
-   Los intervalos son `RetrievalConfig.fusion_weight` (0,1–3, log) y
-   `fusion_quota_share` (0–1). La cuota se normaliza y ocupa alrededor del
-   80 % de M.
+   `score(u, i) = Σ_s  w_s / (k + rango_s(u, i))`
+
+   con `k = 60` fijo. `k` no se busca junto con los pesos: los dos cambian
+   cuánto pesa el tope de cada lista respecto del fondo, y la búsqueda no
+   podría separarlos. Un libro que no aparece en una fuente no suma ese
+   término. Los pesos se normalizan para sumar 1. Escalarlos a todos por una
+   constante no cambia el orden, y un árbol tampoco parte distinto `rrf_score`
+   si solo cambia la escala. Los pesos por defecto, antes de normalizar, son
+   0,5 (popularidad), 1,0 (cosenos, SVD, ALS, BPR) y 0,8 (TF-IDF).
+3. El corte `rrf_cutoff` se queda con los primeros C libros de ese ranking
+   (`rrf_score` descendente, desempate por `id_libro`). Un corte mayor es un
+   prefijo más largo del mismo ranking: solo agrega candidatos. El defecto es
+   200. Con `--tune`, Optuna recorre C como entero en escala logarítmica entre
+   100 y 1.000 (`rrf_cutoff_search`) y un peso por fuente
+   (`fusion_weight`, 0,1–3, log). La escala logarítmica sigue el rendimiento
+   decreciente de agrandar el conjunto.
 
 El orden de la fusión (`retrieval_rank`, `rrf_score`) no es el ranking final:
 solo define quién entra al ranker. Los scores y rangos de cada fuente se
@@ -144,15 +155,17 @@ Librerías: LightGBM ≥ 4.7, NumPy, pandas. NDCG de evaluación:
 `sklearn.metrics.ndcg_score` en `src/quelibroleo/metrics.py`.
 
 La búsqueda opcional (`main.py evaluate --tune`) es un solo study de Optuna,
-`PipelineConfig.optuna_trials` trials. Recorre juntos el presupuesto, los pesos
-y las cuotas de fusión, y `RankerConfig.search_space`. El objetivo es el
-NDCG@20 del top-20 de LambdaRank en el último fold rolling, entrenando con los
-folds anteriores. Ese fold también corta el early stopping. El hold-out oficial
-no entra al study. `n_estimators` y `early_stopping_rounds` quedan fijos. Un
-trial se descarta si `num_leaves` supera `2^max_depth`, o si
-`min_child_samples * num_leaves` supera las filas de entrenamiento. El resultado
-queda en `artifacts/tuned_hyperparameters.json`. Sin `--tune`, el entrenamiento
-de la evaluación y de la entrega usa ese archivo.
+`PipelineConfig.optuna_trials` trials. Recorre juntos el corte de RRF, un peso
+por fuente y `RankerConfig.search_space`. El objetivo es el NDCG@20 del top-20
+de LambdaRank en el último fold rolling, entrenando con los folds anteriores.
+Ese fold también corta el early stopping. El hold-out oficial no entra al
+study. `n_estimators`, `early_stopping_rounds`, `rrf_k` y la ventana de
+retrieval quedan fijos. Un trial se descarta si `num_leaves` supera
+`2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de
+entrenamiento. El resultado queda en `artifacts/tuned_hyperparameters.json`,
+con los pesos ya normalizados. Sin `--tune`, el entrenamiento de la evaluación
+y de la entrega usa ese archivo. Un archivo de una búsqueda anterior, con
+cuotas, no se reutiliza.
 
 ### Features del ranker
 

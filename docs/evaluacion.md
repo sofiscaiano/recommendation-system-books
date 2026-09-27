@@ -26,7 +26,7 @@ Resultado oficial del sistema completo contra el baseline de popularidad.
 | `long_tail_exposure_at_20` | Proporción de posiciones del top-20 ocupadas por libros de cola larga. La cola incluye los libros cuyo conteo está en el 80 % inferior de popularidad. |
 | `paired_delta` | Diferencia de NDCG@20 entre el modelo y la popularidad para el mismo usuario. `mean` es el promedio; `lower` y `upper` son el intervalo bootstrap del 95 % con 2.000 remuestreos. |
 | `segments` | Métricas por grupo de usuarios. Cada grupo incluye NDCG@20, Recall@20 del ranking, recall de retrieval, cobertura y exposición long-tail. |
-| `candidate_budget` | Cantidad máxima de candidatos entregada al ranker. |
+| `candidate_budget` | Corte del ranking de RRF: cuántos candidatos entran al ranker. Es un prefijo del ranking fusionado sobre la ventana de 1.000. |
 | `evaluation_users` | Lectores incluidos en el holdout. |
 
 Los segmentos `activity_q1` a `activity_q4` dividen a los usuarios evaluados en
@@ -75,8 +75,8 @@ tipos de fila y ambos usan el último fold interno, no el holdout oficial.
 `without_als` con recall menor que las demás filas indica que ALS aporta
 positivos que las otras fuentes no recuperan. Una ablación con métrica mayor no
 significa que la fuente perjudique el ranking final; solo indica que, en ese
-fold y con las cuotas fijas, la fusión sin ella dejó un conjunto candidato con
-mejor cobertura.
+fold y con los pesos y el corte fijos, la fusión sin ella dejó un conjunto
+candidato con mejor cobertura.
 
 ## `feature_importance.csv`
 
@@ -116,18 +116,19 @@ entrega sigue siendo solo `id_lector,id_libro`.
 
 ## `config.json`
 
-Parámetros con los que arrancó la ejecución: semilla, presupuesto de candidatos,
-cuotas, pesos y configuración de LightGBM. Son los valores de `PipelineConfig`.
+Parámetros con los que arrancó la ejecución: semilla, ventana y corte de RRF,
+pesos y configuración de LightGBM. Son los valores de `PipelineConfig`.
 Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
 `tuned_hyperparameters.json`.
 
 ## `tuned_hyperparameters.json`
 
-Solo aparece si la corrida usó `--tune`. Guarda el presupuesto de candidatos,
-los pesos y las cuotas de fusión, y los hiperparámetros de LambdaRank elegidos
-por Optuna. `evaluate` y `submit` sin `--tune` leen este archivo y entrenan con
-esos valores. Si no existe, usan la config fija de `PipelineConfig`. Otra
-corrida con `--tune` vuelve a buscar y reemplaza el archivo.
+Solo aparece si la corrida usó `--tune`. Guarda el corte del ranking de RRF,
+los pesos de cada fuente (normalizados para sumar 1) y los hiperparámetros de
+LambdaRank elegidos por Optuna. `evaluate` y `submit` sin `--tune` leen este
+archivo y entrenan con esos valores. Si no existe, usan la config fija de
+`PipelineConfig`. Un archivo generado con cuotas por fuente no sirve para esta
+fusión. Otra corrida con `--tune` vuelve a buscar y reemplaza el archivo.
 
 ## `run.log`
 

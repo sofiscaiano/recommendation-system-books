@@ -36,8 +36,11 @@ class SplitConfig:
 class RetrievalConfig:
     """Parámetros comunes de las fuentes de candidatos."""
 
-    candidate_budgets: tuple[int, ...] = (100, 200, 500, 1000)
-    selected_budget: int = 200
+    rrf_window: int = 1000
+    rrf_cutoff: int = 200
+    rrf_cutoff_search: SearchRange = field(
+        default_factory=lambda: SearchRange(100, 1000, log=True, integer=True)
+    )
     recency_half_life_days: float = 365.0
     item_knn_mode: tuple[str, ...] = ("occurrence", "adjusted")
     svd_factors: int = 64
@@ -48,9 +51,6 @@ class RetrievalConfig:
     rrf_k: float = 60.0
     fusion_weight: SearchRange = field(
         default_factory=lambda: SearchRange(0.1, 3.0, log=True)
-    )
-    fusion_quota_share: SearchRange = field(
-        default_factory=lambda: SearchRange(0.0, 1.0)
     )
     source_weights: dict[str, float] = field(
         default_factory=lambda: {
@@ -63,17 +63,18 @@ class RetrievalConfig:
             "tfidf": 0.8,
         }
     )
-    source_quotas: dict[str, int] = field(
-        default_factory=lambda: {
-            "popularidad": 25,
-            "item_cosine": 60,
-            "item_adjusted_cosine": 60,
-            "svd": 75,
-            "als": 75,
-            "bpr": 75,
-            "tfidf": 60,
-        }
-    )
+
+    def __post_init__(self) -> None:
+        low = int(self.rrf_cutoff_search.low)
+        high = int(self.rrf_cutoff_search.high)
+        if self.rrf_k <= 0:
+            raise ValueError("rrf_k debe ser positivo")
+        if self.rrf_window < 1:
+            raise ValueError("rrf_window debe ser positivo")
+        if not 1 <= self.rrf_cutoff <= self.rrf_window:
+            raise ValueError("rrf_cutoff debe estar entre 1 y rrf_window")
+        if low < 1 or high > self.rrf_window or low > high:
+            raise ValueError("rrf_cutoff_search debe caer dentro de 1..rrf_window")
 
 
 @dataclass(frozen=True)

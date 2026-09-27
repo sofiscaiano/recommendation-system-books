@@ -22,9 +22,8 @@ TUNED_HYPERPARAMETERS_FILE = "tuned_hyperparameters.json"
 class PipelineSelection:
     """Hiperparámetros elegidos por el study de punta a punta."""
 
-    budget: int
+    rrf_cutoff: int
     weights: dict[str, float]
-    quotas: dict[str, int]
     ranker: dict[str, Any]
     study: object
 
@@ -33,9 +32,8 @@ class PipelineSelection:
 class TunedHyperparameters:
     """Fusión y LambdaRank listos para entrenar sin volver a buscar."""
 
-    budget: int
+    rrf_cutoff: int
     weights: dict[str, float]
-    quotas: dict[str, int]
     ranker: dict[str, Any]
     run_name: str = ""
 
@@ -59,15 +57,16 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"No se pudo leer {path}") from exc
+    if isinstance(payload, dict) and "source_quotas" in payload:
+        raise ValueError(
+            f"{path} ajusta cuotas por fuente. "
+            "La fusión ahora es RRF ponderado con un corte; corré evaluate --tune de nuevo."
+        )
     try:
         if not isinstance(payload, dict):
             raise TypeError("el archivo no es un objeto")
-        budget = _as_int(payload["candidate_budget"], "candidate_budget")
+        rrf_cutoff = _as_int(payload["rrf_cutoff"], "rrf_cutoff")
         weights = _number_map(payload["source_weights"], "source_weights")
-        quotas = {
-            key: _as_int(value, f"source_quotas.{key}")
-            for key, value in _mapping(payload["source_quotas"], "source_quotas").items()
-        }
         ranker = {
             key: _number(value, f"ranker.{key}")
             for key, value in _mapping(payload["ranker"], "ranker").items()
@@ -77,12 +76,11 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
             raise TypeError("run_name debe ser texto")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Hiperparámetros inválidos en {path}") from exc
-    if budget < 1 or not weights or not quotas or not ranker:
+    if rrf_cutoff < 1 or not weights or not ranker:
         raise ValueError(f"Hiperparámetros inválidos en {path}")
     return TunedHyperparameters(
-        budget=budget,
+        rrf_cutoff=rrf_cutoff,
         weights=weights,
-        quotas=quotas,
         ranker=ranker,
         run_name=run_name,
     )
@@ -94,20 +92,24 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
     path = tuned_hyperparameters_path(config.artifacts_dir)
     if path.is_file():
         loaded = load_tuned_hyperparameters(path)
+        if loaded.rrf_cutoff > config.retrieval.rrf_window:
+            raise ValueError(
+                f"El corte guardado ({loaded.rrf_cutoff}) supera la ventana RRF "
+                f"({config.retrieval.rrf_window})"
+            )
         LOGGER.info(
-            "Reusando hiperparámetros de %s (corrida %s, budget=%s)",
+            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s)",
             path,
             loaded.run_name or "sin nombre",
-            loaded.budget,
+            loaded.rrf_cutoff,
         )
         return loaded, "saved"
     LOGGER.info("Sin %s; se usan los hiperparámetros fijos", path)
     retrieval = config.retrieval
     return (
         TunedHyperparameters(
-            budget=retrieval.selected_budget,
+            rrf_cutoff=retrieval.rrf_cutoff,
             weights=dict(retrieval.source_weights),
-            quotas=dict(retrieval.source_quotas),
             ranker={},
         ),
         "default",
@@ -181,23 +183,11 @@ def tune_pipeline(
     sources = sorted(materials[-1].source_candidates["source"].unique())
     if not sources:
         raise ValueError("No hay fuentes para ajustar")
-    budgets = [int(budget) for budget in retrieval.candidate_budgets if int(budget) >= 1]
-    if not budgets:
-        raise ValueError("No se proporcionaron presupuestos válidos")
 
     def objective(trial: Any) -> float:
-        budget = int(trial.suggest_categorical("candidate_budget", budgets))
+        cutoff = int(retrieval.rrf_cutoff_search.suggest(trial, "rrf_cutoff"))
         weights = {
-            source: retrieval.fusion_weight.suggest(trial, f"weight__{source}")
-            for source in sources
-        }
-        quota_shares = {
-            source: retrieval.fusion_quota_share.suggest(trial, f"quota__{source}")
-            for source in sources
-        }
-        share_total = sum(quota_shares.values()) or 1.0
-        quotas = {
-            source: round(0.8 * budget * quota_shares[source] / share_total)
+            source: float(retrieval.fusion_weight.suggest(trial, f"weight__{source}"))
             for source in sources
         }
         parameters = {
@@ -209,11 +199,10 @@ def tune_pipeline(
 
         fusion = CandidateFusion(
             weights=weights,
-            quotas=quotas,
             rrf_k=retrieval.rrf_k,
         )
         built = [
-            _material_to_features(material, fusion, budget)[0] for material in materials
+            _material_to_features(material, fusion, cutoff)[0] for material in materials
         ]
         train = _concat_feature_sets(built[:-1])
         validation = built[-1]
@@ -227,8 +216,8 @@ def tune_pipeline(
         ).fit(train, validation)
         recommendations = ranker.predict(validation)
         score = ndcg_at_k(recommendations, materials[-1].target, k=20)
-        trial.set_user_attr("weights", weights)
-        trial.set_user_attr("quotas", quotas)
+        trial.set_user_attr("weights", dict(fusion.weights))
+        trial.set_user_attr("rrf_cutoff", cutoff)
         trial.set_user_attr("ranker", parameters)
         return score
 
@@ -252,9 +241,8 @@ def tune_pipeline(
 
     best = study.best_trial
     return PipelineSelection(
-        budget=int(best.params["candidate_budget"]),
+        rrf_cutoff=int(best.user_attrs["rrf_cutoff"]),
         weights={key: float(value) for key, value in best.user_attrs["weights"].items()},
-        quotas={key: int(value) for key, value in best.user_attrs["quotas"].items()},
         ranker={key: _plain(value) for key, value in best.user_attrs["ranker"].items()},
         study=study,
     )
