@@ -60,6 +60,7 @@ logs/
 tmp/
 temp/
 artifacts/
+submissions/
 mlruns/
 mlartifacts/
 mlflow.db

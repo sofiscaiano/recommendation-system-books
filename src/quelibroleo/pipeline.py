@@ -80,6 +80,8 @@ class TrainedPipeline:
     rrf_cutoff: int
     fold_metrics: list[dict[str, float]]
     ablation_metrics: list[dict[str, object]]
+    hyperparameters_origin: str = "default"
+    hyperparameters_run_name: str = ""
 
 
 def _make_retrievers(config: PipelineConfig) -> list[Any]:
@@ -269,7 +271,15 @@ def train_ranker_from_history(
     if len(folds) < 2:
         raise ValueError("Se requieren al menos dos folds rolling para entrenar")
 
-    saved = None if tune else resolve_saved_or_default(config)[0]
+    if tune:
+        saved = None
+        hyperparameters_origin = "tune"
+        from .tracking import active_run_name
+
+        hyperparameters_run_name = active_run_name()
+    else:
+        saved, hyperparameters_origin = resolve_saved_or_default(config)
+        hyperparameters_run_name = saved.run_name if hyperparameters_origin == "saved" else ""
     per_source = config.retrieval.rrf_window
     materials = [
         _collect_material(
@@ -389,6 +399,8 @@ def train_ranker_from_history(
         rrf_cutoff=cutoff,
         fold_metrics=fold_metrics,
         ablation_metrics=ablation_metrics,
+        hyperparameters_origin=hyperparameters_origin,
+        hyperparameters_run_name=hyperparameters_run_name,
     )
 
 
@@ -647,12 +659,20 @@ def _submit(
         sort=False,
     )
     submission = _fill_submission(ranked, users, seen_history, popularity)
-    from .tracking import write_output_marker, write_run_marker
+    from .tracking import archive_submission, write_run_marker
 
     destination = Path(output_path or config.output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     submission.to_csv(destination, index=False)
-    write_output_marker(destination)
+    archived = archive_submission(
+        destination,
+        origin=trained.hyperparameters_origin,
+        hyperparameters_run_name=trained.hyperparameters_run_name,
+        hyperparameters=_hyperparameters_snapshot(trained),
+        note=config.run_note,
+        seed=config.random_seed,
+    )
+    LOGGER.info("Copia identificada en %s", archived)
 
     artifacts = Path(config.artifacts_dir)
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -660,6 +680,17 @@ def _submit(
     joblib.dump(trained, artifacts / "final_pipeline.joblib")
     _retain_latest_caches(Path(config.artifacts_dir) / "cache", "submit", used_caches)
     return submission
+
+
+def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:
+    ranker_values = asdict(trained.ranker.config)
+    ranker_values.pop("search_space", None)
+    ranker_values.update(trained.ranker.overrides)
+    return {
+        "rrf_cutoff": trained.rrf_cutoff,
+        "source_weights": dict(trained.weights),
+        "ranker": ranker_values,
+    }
 
 
 def run_ablations(

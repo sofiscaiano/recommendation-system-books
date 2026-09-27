@@ -110,9 +110,28 @@ ser candidatos.
 
 Nombre único de la corrida MLflow (`run_name`). El mismo valor encabeza los JSON
 y los CSV de diagnóstico de esa ejecución, y es el prefijo del study de
-Optuna (`{run_name}__pipeline`). Junto a
-`submission.csv` queda `submission.csv.run.json` con ese nombre: el CSV de
-entrega sigue siendo solo `id_lector,id_libro`.
+Optuna (`{run_name}__pipeline`). El CSV de entrega sigue siendo solo
+`id_lector,id_libro`.
+
+## Entregas archivadas
+
+`submit` sigue escribiendo `submission.csv` en la raíz, que es el archivo para
+subir. Además copia esa entrega a `submissions/{run_name}/submission.csv` y
+deja `manifest.json` en la misma carpeta. Una corrida nueva crea otra carpeta;
+no reemplaza las anteriores. `submission.csv.run.json` repite el manifiesto de
+la última. La carpeta también queda como artefacto de esa corrida en MLflow.
+
+| Campo | Qué identifica |
+| --- | --- |
+| `run_name` | Esta corrida de `submit`. Es el nombre de la carpeta. |
+| `mlflow_run_id` | La corrida en MLflow, para abrir métricas y bajar la copia. |
+| `git_commit` | SHA de `HEAD` al correr. |
+| `git_dirty` | Si había cambios sin commitear. En ese caso el SHA no es el código exacto. |
+| `hyperparameters_origin` | `tune` si este submit buscó, `saved` si reutilizó el JSON, `default` si usó la config fija. |
+| `hyperparameters_run_name` | Corrida que eligió los hiperparámetros. El study de Optuna es `{ese nombre}__pipeline`. Vacío si el origen es `default`. |
+| `hyperparameters` | Corte de RRF, pesos y LambdaRank con los que se entrenó esta entrega. |
+| `note`, `seed` | Descripción obligatoria y semilla. |
+| `csv_sha256` | Hash del CSV, para comprobar que una copia recuperada es la misma. |
 
 ## `config.json`
 

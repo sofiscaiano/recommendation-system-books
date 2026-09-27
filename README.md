@@ -60,8 +60,13 @@ Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 reutiliza el archivo guardado y `fixed` si usa los valores por defecto. Ese
 nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
-cambia de columnas: el vínculo está en `submission.csv.run.json`. Con `--tune`, el study de Optuna abre una corrida hija `{run_name}__pipeline`
-con la serie de trials en el step.
+cambia de columnas. Cada `submit` copia esa entrega a `submissions/{run_name}/`
+sin pisar las anteriores: ahí quedan el CSV y un `manifest.json` con el commit,
+si el árbol tenía cambios sin commitear, el id de la corrida que tuneó y los
+hiperparámetros usados. `submission.csv.run.json` repite el manifiesto de la
+última. Esos archivos también se adjuntan a la corrida en MLflow. Con `--tune`,
+el study de Optuna abre una corrida hija `{run_name}__pipeline` con la serie de
+trials en el step.
 Para comparar:
 
 ```bash

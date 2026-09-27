@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import shutil
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -76,28 +79,80 @@ def write_run_marker(directory: Path) -> None:
     )
 
 
-def write_output_marker(output_path: Path) -> None:
+def write_output_marker(output_path: Path, payload: dict[str, Any]) -> None:
     """Sidecar de una salida CSV: el CSV de entrega no puede cambiar de columnas."""
 
-    import json
-
-    run_name = active_run_name()
-    if not run_name:
-        return
     marker = output_path.with_name(output_path.name + ".run.json")
-    marker.write_text(
-        json.dumps(
-            {"run_name": run_name, "output": output_path.name},
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    marker.write_text(_dump(payload), encoding="utf-8")
     import mlflow
 
     if mlflow.active_run() is not None:
         mlflow.log_artifact(str(marker))
+
+
+def archive_submission(
+    output_path: Path,
+    *,
+    origin: str,
+    hyperparameters_run_name: str,
+    hyperparameters: dict[str, Any],
+    note: str,
+    seed: int,
+) -> Path:
+    """Copia la entrega a una carpeta nueva y deja el manifiesto de procedencia."""
+
+    import mlflow
+
+    run_name = active_run_name()
+    if not run_name:
+        raise RuntimeError("No hay una corrida activa para archivar la entrega")
+    active = mlflow.active_run()
+    run_id = "" if active is None else active.info.run_id
+    commit, dirty = git_state()
+    digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
+    manifest = {
+        "run_name": run_name,
+        "mlflow_run_id": run_id,
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "hyperparameters_origin": origin,
+        "hyperparameters_run_name": hyperparameters_run_name,
+        "hyperparameters": hyperparameters,
+        "note": note.strip(),
+        "seed": seed,
+        "csv_sha256": digest,
+        "output": output_path.name,
+    }
+    folder = output_path.parent / "submissions" / run_name
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(output_path, folder / "submission.csv")
+    (folder / "manifest.json").write_text(_dump(manifest), encoding="utf-8")
+    write_output_marker(output_path, manifest)
+    if active is not None:
+        mlflow.log_artifact(str(folder / "submission.csv"), artifact_path=f"submissions/{run_name}")
+        mlflow.log_artifact(str(folder / "manifest.json"), artifact_path=f"submissions/{run_name}")
+        tags = {"hyperparameters_origin": origin, "csv_sha256": digest}
+        if hyperparameters_run_name:
+            tags["hyperparameters_run_name"] = hyperparameters_run_name
+        mlflow.set_tags(tags)
+    return folder
+
+
+def _dump(payload: dict[str, Any]) -> str:
+    return json.dumps(_json_ready(payload), ensure_ascii=False, indent=2) + "\n"
+
+
+def _json_ready(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    item = getattr(value, "item", None)
+    if callable(item):
+        return _json_ready(item())
+    return value
 
 
 def study_name(stage: str) -> str:
@@ -109,20 +164,37 @@ def study_name(stage: str) -> str:
     return f"{run_name}__{stage}"
 
 
-def git_head() -> str:
-    """Commit actual, o vacío si git no está disponible."""
-
+def _git(*args: str) -> str | None:
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", *args],
             check=True,
             capture_output=True,
             text=True,
             cwd=Path(__file__).resolve().parents[2],
         )
     except (OSError, subprocess.CalledProcessError):
+        return None
+    return completed.stdout
+
+
+def git_head() -> str:
+    """Commit actual, o vacío si git no está disponible."""
+
+    output = _git("rev-parse", "HEAD")
+    if output is None:
         return ""
-    return completed.stdout.strip()
+    return output.strip()
+
+
+def git_state() -> tuple[str, bool | None]:
+    """Commit de HEAD y si el árbol de trabajo tiene cambios sin commitear."""
+
+    commit = git_head()
+    status = _git("status", "--porcelain")
+    if status is None:
+        return commit, None
+    return commit, bool(status.strip())
 
 
 def tracking_uri() -> str:
@@ -190,7 +262,7 @@ def track_command(
 
     mlflow.set_tracking_uri(tracking_uri())
     mlflow.set_experiment(EXPERIMENT_NAME)
-    head = git_head()
+    head, dirty = git_state()
     run_name = new_run_name(
         command,
         tune=tune,
@@ -207,6 +279,7 @@ def track_command(
                     "tune": str(tune).lower(),
                     "run_name": run_name,
                     "git_commit": head,
+                    "git_dirty": "" if dirty is None else str(dirty).lower(),
                     "mlflow.note.content": description,
                 }
             )

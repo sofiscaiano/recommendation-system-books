@@ -49,6 +49,7 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     assert stored.data.params["command"] == "evaluate"
     assert stored.data.tags["mlflow.note.content"] == "hold-out de prueba"
     assert stored.data.tags["git_commit"]
+    assert stored.data.tags["git_dirty"] in {"true", "false"}
     assert stored.info.run_name == stored.data.tags["run_name"]
     assert "-evaluate-fixed-" in stored.info.run_name
 
@@ -67,6 +68,84 @@ def test_run_name_marks_reused_hyperparameters(tmp_path, monkeypatch) -> None:
         run_name = mlflow.active_run().info.run_name
 
     assert "-submit-tuned-" in run_name
+
+
+def test_archive_submission_keeps_each_copy(tmp_path, monkeypatch) -> None:
+    import json
+
+    from quelibroleo.tracking import active_run_name, archive_submission
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    monkeypatch.setattr(
+        "quelibroleo.tracking.git_state",
+        lambda: ("abc123", False),
+    )
+    csv_path = tmp_path / "submission.csv"
+    hyperparameters = {
+        "rrf_cutoff": 200,
+        "source_weights": {"svd": 1.0},
+        "ranker": {"learning_rate": 0.04},
+    }
+
+    csv_path.write_text("id_lector,id_libro\na,b\n", encoding="utf-8")
+    with track_command(
+        "submit",
+        PipelineConfig(run_note="primera entrega", artifacts_dir=tmp_path),
+        tune=False,
+    ):
+        first = active_run_name()
+        first_id = mlflow.active_run().info.run_id
+        archive_submission(
+            csv_path,
+            origin="saved",
+            hyperparameters_run_name="20260923-evaluate-tune-abcd",
+            hyperparameters=hyperparameters,
+            note="primera entrega",
+            seed=42,
+        )
+
+    csv_path.write_text("id_lector,id_libro\na,c\n", encoding="utf-8")
+    with track_command(
+        "submit",
+        PipelineConfig(run_note="segunda entrega", artifacts_dir=tmp_path),
+        tune=False,
+    ):
+        second = active_run_name()
+        archive_submission(
+            csv_path,
+            origin="default",
+            hyperparameters_run_name="",
+            hyperparameters=hyperparameters,
+            note="segunda entrega",
+            seed=7,
+        )
+
+    assert first != second
+    first_dir = tmp_path / "submissions" / first
+    second_dir = tmp_path / "submissions" / second
+    assert (first_dir / "submission.csv").read_text(encoding="utf-8").endswith("a,b\n")
+    assert (second_dir / "submission.csv").read_text(encoding="utf-8").endswith("a,c\n")
+    manifest = json.loads((first_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["mlflow_run_id"] == first_id
+    assert manifest["git_commit"] == "abc123"
+    assert manifest["git_dirty"] is False
+    assert manifest["hyperparameters_origin"] == "saved"
+    assert manifest["hyperparameters_run_name"] == "20260923-evaluate-tune-abcd"
+    assert manifest["hyperparameters"] == hyperparameters
+    assert manifest["note"] == "primera entrega"
+    assert manifest["seed"] == 42
+    assert manifest["csv_sha256"]
+    sidecar = json.loads((tmp_path / "submission.csv.run.json").read_text(encoding="utf-8"))
+    assert sidecar["run_name"] == second
+    assert sidecar["hyperparameters_origin"] == "default"
+    stored = mlflow.tracking.MlflowClient().get_run(first_id)
+    assert stored.data.tags["hyperparameters_run_name"] == "20260923-evaluate-tune-abcd"
+    names = [
+        item.path
+        for item in mlflow.tracking.MlflowClient().list_artifacts(first_id, f"submissions/{first}")
+    ]
+    assert f"submissions/{first}/submission.csv" in names
+    assert f"submissions/{first}/manifest.json" in names
 
 
 @dataclass
