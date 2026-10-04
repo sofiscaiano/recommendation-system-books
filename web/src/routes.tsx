@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/card";
 import { AppSidebar } from "@/components/app-sidebar";
 import { LoginForm } from "@/components/login-form";
+import { Logo } from "@/components/logo";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RatingSelect } from "./RatingSelect";
@@ -101,8 +102,10 @@ function LoginPage() {
 
   return (
     <main className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
+      <div className="flex w-full max-w-sm flex-col items-center gap-6">
+        <Logo />
         <LoginForm
+          className="w-full"
           onSubmit={(idLector) => {
             void navigate({ to: "/recomendar/$idLector", params: { idLector } });
           }}

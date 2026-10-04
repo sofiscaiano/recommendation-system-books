@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Que libro leo, abierto</title>
+  <path fill="#1C1917" d="M32 22.2C29.4 16.4 22.6 12.4 14.2 12.4 9.2 12.4 5 14.6 5 14.6v32.2s4.8-2.4 9.6-2.4c8.6 0 14.6 4.8 17.4 9 2.8-4.2 8.8-9 17.4-9 4.8 0 9.6 2.4 9.6 2.4V14.6s-4.2-2.2-9.2-2.2C41.4 12.4 34.6 16.4 32 22.2Z"/>
+  <path stroke="#F4EFE6" stroke-width="1.7" stroke-linecap="round" d="M32 24.2v27"/>
+  <path fill="#C4622D" d="M29 17h6v17.2l-3-2.6-3 2.6V17Z"/>
+</svg>
