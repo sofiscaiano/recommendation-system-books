@@ -53,6 +53,8 @@ class BookOut(BaseModel):
     autor: str
     genero: str
     editorial: str
+    anio_edicion: str
+    isbn: str
     resumen: str
     img_src: str
     rank: int

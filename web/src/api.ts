@@ -4,6 +4,8 @@ export type Book = {
   autor: string;
   genero: string;
   editorial: string;
+  anio_edicion: string;
+  isbn: string;
   resumen: string;
   img_src: string;
   rank: number;

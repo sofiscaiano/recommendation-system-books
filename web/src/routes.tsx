@@ -16,6 +16,37 @@ import { fetchRecommendations } from "./api";
 import { RatingSelect } from "./RatingSelect";
 import { loadRatings, mergeRatings, saveRatings } from "./ratings";
 
+function Cover({ src, title }: { src: string; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="flex h-56 w-36 shrink-0 items-center justify-center bg-slate-100 px-2 text-center text-xs text-slate-500">
+        Sin tapa
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={`Tapa de ${title}`}
+      className="h-56 w-36 shrink-0 bg-slate-100 object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function Attribute({ label, value }: { label: string; value: string }) {
+  if (!value) {
+    return null;
+  }
+  return (
+    <div className="flex gap-2">
+      <dt className="shrink-0 font-medium text-slate-500">{label}</dt>
+      <dd className="min-w-0">{value}</dd>
+    </div>
+  );
+}
+
 function LoginPage() {
   const navigate = useNavigate();
   const [idLector, setIdLector] = useState("");
@@ -108,23 +139,22 @@ function RecommendPage() {
       {query.data ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {query.data.libros.map((book) => (
-            <article key={book.id_libro} className="flex gap-3 rounded border bg-white p-3 shadow-sm">
-              {book.img_src ? (
-                <img
-                  src={book.img_src}
-                  alt=""
-                  className="h-40 w-28 shrink-0 object-cover"
-                />
-              ) : null}
-              <div className="flex min-w-0 flex-1 flex-col">
+            <article
+              key={book.id_libro}
+              className="flex overflow-hidden rounded border bg-white shadow-sm"
+            >
+              <Cover src={book.img_src} title={book.titulo} />
+              <div className="flex min-w-0 flex-1 flex-col p-3">
                 <h2 className="font-semibold">{book.titulo}</h2>
-                <p className="text-sm text-slate-600">
-                  {book.autor}
-                  {book.genero ? ` · ${book.genero}` : ""}
-                  {book.editorial ? ` · ${book.editorial}` : ""}
-                </p>
+                <dl className="mt-2 space-y-1 text-sm text-slate-600">
+                  <Attribute label="Autor" value={book.autor} />
+                  <Attribute label="Género" value={book.genero} />
+                  <Attribute label="Editorial" value={book.editorial} />
+                  <Attribute label="Año" value={book.anio_edicion} />
+                  <Attribute label="ISBN" value={book.isbn} />
+                </dl>
                 {book.resumen ? (
-                  <p className="mt-2 line-clamp-6 text-xs text-slate-700">{book.resumen}</p>
+                  <p className="mt-2 line-clamp-5 text-xs text-slate-700">{book.resumen}</p>
                 ) : null}
                 <div className="mt-auto flex items-center justify-end gap-2 pt-3">
                   <RatingSelect

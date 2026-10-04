@@ -156,6 +156,8 @@ class ServingIndex:
                     "autor": meta.get("autor", ""),
                     "genero": meta.get("genero", ""),
                     "editorial": meta.get("editorial", ""),
+                    "anio_edicion": meta.get("anio_edicion", ""),
+                    "isbn": meta.get("isbn", ""),
                     "resumen": meta.get("resumen", ""),
                     "img_src": meta.get("img_src", ""),
                     "rank": rank,
@@ -173,11 +175,8 @@ def load_serving_index(artifact: str | Path, db_path: str | Path) -> ServingInde
 
     model = load_serving_model(artifact)
     bundle = load_dataset(db_path)
-    display = ["titulo", "autor", "genero", "editorial", "resumen", "img_src"]
-    slim = bundle.books[[ITEM_COL, *display]].fillna("").astype(str)
     books = {
-        str(row[ITEM_COL]): {column: str(row[column]) for column in display}
-        for row in slim.to_dict(orient="records")
+        str(row[ITEM_COL]): _book_card(row) for row in bundle.books.to_dict(orient="records")
     }
     history_frame = bundle.interactions[[USER_COL, ITEM_COL, DATE_COL, RATING_COL]]
     history = {
@@ -204,6 +203,54 @@ def load_serving_index(artifact: str | Path, db_path: str | Path) -> ServingInde
         extra_seen=extra_seen,
         known_ids=known_ids,
     )
+
+
+def _book_card(row: dict[str, Any]) -> dict[str, str]:
+    return {
+        "titulo": _text(row.get("titulo")),
+        "autor": _text(row.get("autor")),
+        "genero": _text(row.get("genero")),
+        "editorial": _text(row.get("editorial")),
+        "anio_edicion": _year(row.get("anio_edicion")),
+        "isbn": _isbn(row.get("isbn")),
+        "resumen": _text(row.get("resumen")),
+        "img_src": _text(row.get("img_src")),
+    }
+
+
+def _missing(value: object) -> bool:
+    if value is None:
+        return True
+    return bool(pd.isna(value))
+
+
+def _text(value: object) -> str:
+    if _missing(value):
+        return ""
+    return str(value).strip()
+
+
+def _year(value: object) -> str:
+    if _missing(value):
+        return ""
+    try:
+        year = int(float(str(value)))
+    except (TypeError, ValueError):
+        return ""
+    if 1000 <= year <= 2100:
+        return str(year)
+    return ""
+
+
+def _isbn(value: object) -> str:
+    if _missing(value):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value).strip()
+    if text.endswith(".0"):
+        return text[:-2]
+    return text
 
 
 def unknown_book_ids(book_ids: list[str], catalog: set[str]) -> list[str]:

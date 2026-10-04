@@ -13,6 +13,8 @@ from quelibroleo.ranker import LambdaRanker
 from quelibroleo.retrieval import CandidateFusion, fit_retrievers, per_source_depth
 from quelibroleo.serving import (
     ServingModel,
+    _isbn,
+    _year,
     build_request_history,
     export_serving_artifact,
     recommend_user,
@@ -201,6 +203,14 @@ def test_serving_model_roundtrip(
     assert recommend_user(restored, "u1", history) == recommend_user(
         model, "u1", history
     )
+
+
+def test_book_card_formats_year_and_isbn() -> None:
+    assert _year(2006) == "2006"
+    assert _year(2006.0) == "2006"
+    assert _year(None) == ""
+    assert _isbn(9788433967305.0) == "9788433967305"
+    assert _isbn("978-84-339-6730-5") == "978-84-339-6730-5"
 
 
 def test_unknown_book_ids_keep_first_seen_order() -> None:
