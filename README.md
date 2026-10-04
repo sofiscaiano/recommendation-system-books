@@ -110,9 +110,60 @@ reutilizan. La definición de cada archivo
 y métrica está en [`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre
 se abre en modo de solo lectura.
 
+## Prototipo en vivo
+
+La página vive en [`web/`](web/) y se publica en Cloudflare Pages. La API corre
+en esta máquina: carga una vez `artifacts/serving.joblib` y, por cada lector,
+solo rankea. `evaluate` y `submit` no cambian. Las valoraciones de la demo
+quedan en el navegador y no se escriben en `data.db`.
+
+Después de un `submit`:
+
+```bash
+uv run python main.py export-serving
+```
+
+Eso ajusta las fuentes sobre toda la historia y escribe
+`artifacts/serving.joblib`. Tarda cerca de un minuto y no se repite en cada
+visita.
+
+Para probar la API en local, un solo worker:
+
+```bash
+uv sync --extra serve
+uv run uvicorn serving.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+`GET /health` responde `{"ready": true}` cuando el artefacto terminó de cargar.
+La página, en otra terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Sin `VITE_API_URL`, el front llama a `http://localhost:8000`.
+
+En la demo, Docker deja el modelo prendido y el túnel lo publica en HTTPS.
+`serving/.env` (a partir de `serving/.env.example`) lleva `TUNNEL_TOKEN` y
+`CORS_ORIGINS`. El puerto de la API queda en `127.0.0.1`; a internet sale solo
+el túnel. Docker Desktop necesita unos 6 GB para el VM.
+
+```bash
+caffeinate -dims docker compose -f serving/docker-compose.yml up --build api
+caffeinate -dims docker compose -f serving/docker-compose.yml --profile tunnel up --build
+```
+
+En Cloudflare, el hostname público del túnel apunta a `http://api:8000`.
+Pages usa la raíz `web`, el comando `npm run build` y la salida `dist`.
+`VITE_API_URL` es la URL del túnel. `web/public/_redirects` deja que
+`/recomendar/...` recargue directo. Con la tapa abierta el proceso sigue en
+memoria; al bajar el compose la página queda publicada y la API no.
+
 ## Pruebas
 
 ```bash
 uv run pytest
-uv run ruff check src tests main.py
+uv run ruff check src tests main.py serving/app.py
 ```
