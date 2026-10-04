@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { TriangleAlert } from "lucide-react";
 import {
   createRootRoute,
   createRoute,
@@ -144,7 +145,8 @@ function RecommendPage() {
         </header>
         <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
           {coldStart ? (
-            <Alert className="mb-4">
+            <Alert variant="warning" className="mb-4">
+              <TriangleAlert />
               <AlertTitle>Lector nuevo</AlertTitle>
               <AlertDescription>
                 Este lector no está en la base. La lista es la de popularidad hasta que
