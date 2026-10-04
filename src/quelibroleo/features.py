@@ -188,6 +188,106 @@ class FeatureBuilder:
         result[output] = result["_pair"] / result["_total"]
         return result[[previous, current, output]]
 
+    def user_frames_for(self, history: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        """Tablas de usuario para un historial, sin modificar las de ``fit``."""
+
+        if any(
+            value is None
+            for value in (
+                self.catalog_,
+                self.user_stats_,
+                self.user_author_,
+                self.user_genre_,
+                self.user_last_,
+                self.user_recent_author_,
+                self.user_recent_genre_,
+            )
+        ):
+            raise RuntimeError("FeatureBuilder debe entrenarse antes de transformar")
+
+        stored = {
+            "user_stats": self.user_stats_,
+            "user_author": self.user_author_,
+            "user_genre": self.user_genre_,
+            "user_last": self.user_last_,
+            "user_recent_author": self.user_recent_author_,
+            "user_recent_genre": self.user_recent_genre_,
+        }
+        if history.empty:
+            return {key: frame.iloc[0:0].copy() for key, frame in stored.items()}
+
+        metadata = self.catalog_
+        ordered = history.sort_values([USER_COL, DATE_COL, ITEM_COL], kind="mergesort")
+        enriched = ordered.merge(metadata, on=ITEM_COL, how="left")
+        enriched[["autor", "genero", "editorial"]] = enriched[
+            ["autor", "genero", "editorial"]
+        ].fillna("")
+        enriched[RATING_COL] = pd.to_numeric(enriched[RATING_COL])
+
+        user_stats = (
+            enriched.groupby(USER_COL)
+            .agg(
+                user_count=(ITEM_COL, "size"),
+                user_mean_rating=(RATING_COL, "mean"),
+                user_std_rating=(RATING_COL, "std"),
+                user_first_date=(DATE_COL, "min"),
+                user_last_date=(DATE_COL, "max"),
+                user_distinct_authors=("autor", "nunique"),
+                user_distinct_genres=("genero", "nunique"),
+            )
+            .reset_index()
+        )
+        user_stats["user_active_days"] = (
+            user_stats["user_last_date"] - user_stats["user_first_date"]
+        ).dt.days
+        user_stats = user_stats.drop(columns="user_first_date")
+
+        user_author = (
+            enriched.groupby([USER_COL, "autor"])
+            .agg(
+                user_author_count=(ITEM_COL, "size"),
+                user_author_mean=(RATING_COL, "mean"),
+            )
+            .reset_index()
+        )
+        user_genre = (
+            enriched.groupby([USER_COL, "genero"])
+            .agg(
+                user_genre_count=(ITEM_COL, "size"),
+                user_genre_mean=(RATING_COL, "mean"),
+            )
+            .reset_index()
+        )
+        last = enriched.groupby(USER_COL, sort=False).tail(1)
+        user_last = last[[USER_COL, DATE_COL, "autor", "genero"]].rename(
+            columns={
+                DATE_COL: "user_cutoff_date",
+                "autor": "last_author",
+                "genero": "last_genre",
+            }
+        )
+        recent = enriched.groupby(USER_COL, sort=False).tail(self.recent_n)
+        user_recent_author = (
+            recent.groupby([USER_COL, "autor"])
+            .size()
+            .rename("recent_author_count")
+            .reset_index()
+        )
+        user_recent_genre = (
+            recent.groupby([USER_COL, "genero"])
+            .size()
+            .rename("recent_genre_count")
+            .reset_index()
+        )
+        return {
+            "user_stats": user_stats,
+            "user_author": user_author,
+            "user_genre": user_genre,
+            "user_last": user_last,
+            "user_recent_author": user_recent_author,
+            "user_recent_genre": user_recent_genre,
+        }
+
     def transform(
         self,
         fused_candidates: pd.DataFrame,
@@ -240,12 +340,8 @@ class FeatureBuilder:
         frame = frame.merge(self.catalog_, on=ITEM_COL, how="left")
         frame = frame.merge(self.user_stats_, on=USER_COL, how="left")
         frame = frame.merge(self.item_stats_, on=ITEM_COL, how="left")
-        frame = frame.merge(
-            self.user_author_, on=[USER_COL, "autor"], how="left"
-        )
-        frame = frame.merge(
-            self.user_genre_, on=[USER_COL, "genero"], how="left"
-        )
+        frame = frame.merge(self.user_author_, on=[USER_COL, "autor"], how="left")
+        frame = frame.merge(self.user_genre_, on=[USER_COL, "genero"], how="left")
         frame = frame.merge(self.user_last_, on=USER_COL, how="left")
         frame = frame.merge(
             self.user_recent_author_, on=[USER_COL, "autor"], how="left"
@@ -301,8 +397,7 @@ class FeatureBuilder:
         feature_columns = tuple(
             column
             for column in frame.columns
-            if column not in excluded
-            and pd.api.types.is_numeric_dtype(frame[column])
+            if column not in excluded and pd.api.types.is_numeric_dtype(frame[column])
         )
         numeric_columns = list(feature_columns)
         frame.loc[:, numeric_columns] = frame.loc[:, numeric_columns].replace(

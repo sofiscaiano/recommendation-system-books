@@ -13,6 +13,7 @@ import typer
 from quelibroleo.config import PipelineConfig
 from quelibroleo.pipeline import evaluate as evaluate_pipeline
 from quelibroleo.pipeline import train_final_and_submit
+from quelibroleo.serving import export_serving_artifact
 
 app = typer.Typer(
     help="Retrieval multi-fuente y ranking LambdaRank para Qué Libro Leo",
@@ -20,7 +21,9 @@ app = typer.Typer(
 )
 
 DbOption = Annotated[Path, typer.Option("--db", help="Base SQLite de solo lectura")]
-ExampleOption = Annotated[Path, typer.Option("--example", help="Lectores de la entrega")]
+ExampleOption = Annotated[
+    Path, typer.Option("--example", help="Lectores de la entrega")
+]
 OutputOption = Annotated[Path, typer.Option("--output", help="CSV de entrega")]
 ArtifactsOption = Annotated[
     Path, typer.Option("--artifacts", help="Directorio de artefactos y log")
@@ -199,6 +202,25 @@ def run_all(
         seed=seed,
         note=note,
     )
+
+
+@app.command(name="export-serving")
+def export_serving(
+    db: DbOption = Path("data.db"),
+    artifacts: ArtifactsOption = Path("artifacts"),
+    seed: SeedOption = 42,
+) -> None:
+    """Ajusta las fuentes sobre toda la historia y escribe artifacts/serving.joblib."""
+
+    _configure_logging(artifacts)
+    config = replace(
+        PipelineConfig(),
+        db_path=db,
+        artifacts_dir=artifacts,
+        random_seed=seed,
+    )
+    destination = export_serving_artifact(config)
+    print(f"Artefacto de serving guardado en {destination}")
 
 
 if __name__ == "__main__":
