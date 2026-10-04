@@ -1,15 +1,9 @@
-import { Link } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
-
+import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarSeparator,
 } from "@/components/ui/sidebar";
 
 type AppSidebarProps = {
@@ -23,17 +17,8 @@ export function AppSidebar({ idLector }: AppSidebarProps) {
         <div className="px-2 py-1.5 font-heading text-sm font-semibold">Qué Libro Leo</div>
       </SidebarHeader>
       <SidebarContent />
-      <SidebarSeparator />
       <SidebarFooter>
-        <p className="truncate px-2 text-sm font-medium">{idLector}</p>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton render={<Link to="/" />}>
-              <LogOut />
-              <span>Salir</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <NavUser name={idLector} />
       </SidebarFooter>
     </Sidebar>
   );
