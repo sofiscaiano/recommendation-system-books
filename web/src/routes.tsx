@@ -3,7 +3,6 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  Link,
   Outlet,
   useNavigate,
   useParams,
@@ -21,7 +20,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { AppSidebar } from "@/components/app-sidebar";
 import { LoginForm } from "@/components/login-form";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RatingSelect } from "./RatingSelect";
 import { loadRatings, mergeRatings, saveRatings } from "./ratings";
@@ -99,7 +100,7 @@ function LoginPage() {
   const navigate = useNavigate();
 
   return (
-    <main className="flex min-h-[calc(100svh-3.5rem)] w-full items-center justify-center p-6 md:p-10">
+    <main className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-sm">
         <LoginForm
           onSubmit={(idLector) => {
@@ -131,91 +132,80 @@ function RecommendPage() {
   const coldStart = query.data && !query.data.conocido && submitted.length === 0;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-6">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight">
-            Recomendaciones
-          </h1>
-          <p className="truncate text-sm text-muted-foreground">{idLector}</p>
-        </div>
-        <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-          Cambiar lector
-        </Button>
-      </div>
-      {coldStart ? (
-        <Alert className="mb-4">
-          <AlertTitle>Lector nuevo</AlertTitle>
-          <AlertDescription>
-            Este lector no está en la base. La lista es la de popularidad hasta que
-            puntúes alguno.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {submitted.length > 0 ? (
-        <Badge variant="secondary" className="mb-4">
-          {submitted.length} puntaje{submitted.length === 1 ? "" : "s"} de esta sesión
-        </Badge>
-      ) : null}
-      {query.isPending ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }, (_, index) => (
-            <Skeleton key={index} className="h-72 rounded-xl" />
-          ))}
-        </div>
-      ) : null}
-      {query.isError ? (
-        <Alert variant="destructive">
-          <AlertTitle>No se pudieron cargar las recomendaciones</AlertTitle>
-          <AlertDescription>
-            {query.error instanceof Error
-              ? query.error.message
-              : "Probá de nuevo en un momento."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {query.data ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {query.data.libros.map((book) => (
-            <BookCard
-              key={book.id_libro}
-              book={book}
-              draft={drafts[book.id_libro] ?? null}
-              onDraft={(value) =>
-                setDrafts((current) => {
-                  const next = { ...current };
-                  if (value) {
-                    next[book.id_libro] = value;
-                  } else {
-                    delete next[book.id_libro];
+    <SidebarProvider>
+      <AppSidebar idLector={idLector} />
+      <SidebarInset>
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger />
+          <h1 className="font-heading text-lg font-semibold">Recomendaciones</h1>
+        </header>
+        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-6">
+          {coldStart ? (
+            <Alert className="mb-4">
+              <AlertTitle>Lector nuevo</AlertTitle>
+              <AlertDescription>
+                Este lector no está en la base. La lista es la de popularidad hasta que
+                puntúes alguno.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {submitted.length > 0 ? (
+            <Badge variant="secondary" className="mb-4">
+              {submitted.length} puntaje{submitted.length === 1 ? "" : "s"} de esta sesión
+            </Badge>
+          ) : null}
+          {query.isPending ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }, (_, index) => (
+                <Skeleton key={index} className="h-72 rounded-xl" />
+              ))}
+            </div>
+          ) : null}
+          {query.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>No se pudieron cargar las recomendaciones</AlertTitle>
+              <AlertDescription>
+                {query.error instanceof Error
+                  ? query.error.message
+                  : "Probá de nuevo en un momento."}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {query.data ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {query.data.libros.map((book) => (
+                <BookCard
+                  key={book.id_libro}
+                  book={book}
+                  draft={drafts[book.id_libro] ?? null}
+                  onDraft={(value) =>
+                    setDrafts((current) => {
+                      const next = { ...current };
+                      if (value) {
+                        next[book.id_libro] = value;
+                      } else {
+                        delete next[book.id_libro];
+                      }
+                      return next;
+                    })
                   }
-                  return next;
-                })
-              }
-            />
-          ))}
+                />
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-4 flex justify-end">
+            <Button type="button" disabled={!hasDraft || query.isFetching} onClick={onMore}>
+              Más recomendaciones
+            </Button>
+          </div>
         </div>
-      ) : null}
-      <div className="mt-4 flex justify-end">
-        <Button type="button" disabled={!hasDraft || query.isFetching} onClick={onMore}>
-          Más recomendaciones
-        </Button>
-      </div>
-    </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
 const rootRoute = createRootRoute({
-  component: () => (
-    <div className="min-h-svh">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center px-6">
-          <span className="font-heading text-sm font-semibold">Qué Libro Leo</span>
-        </div>
-      </header>
-      <Outlet />
-    </div>
-  ),
+  component: () => <Outlet />,
 });
 
 const indexRoute = createRoute({
