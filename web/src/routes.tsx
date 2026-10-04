@@ -8,7 +8,7 @@ import {
   useNavigate,
   useParams,
 } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 
 import { fetchRecommendations, type Book } from "./api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -17,13 +17,11 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { LoginForm } from "@/components/login-form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RatingSelect } from "./RatingSelect";
 import { loadRatings, mergeRatings, saveRatings } from "./ratings";
@@ -99,46 +97,16 @@ function BookCard({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const [idLector, setIdLector] = useState("");
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const id = idLector.trim();
-    if (!id) {
-      return;
-    }
-    void navigate({ to: "/recomendar/$idLector", params: { idLector: id } });
-  }
 
   return (
-    <main className="mx-auto flex w-full max-w-md px-6 py-16">
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-xl">Entrar al sistema</CardTitle>
-          <CardDescription>
-            Un lector de la base, o uno nuevo si todavía no tiene historial.
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={onSubmit}>
-          <CardContent>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="id-lector">Usuario</Label>
-              <Input
-                id="id-lector"
-                value={idLector}
-                onChange={(event) => setIdLector(event.target.value)}
-                minLength={1}
-                maxLength={80}
-                required
-                autoComplete="username"
-              />
-            </div>
-          </CardContent>
-          <CardFooter className="justify-end">
-            <Button type="submit">Entrar</Button>
-          </CardFooter>
-        </form>
-      </Card>
+    <main className="flex min-h-[calc(100svh-3.5rem)] w-full items-center justify-center p-6 md:p-10">
+      <div className="w-full max-w-sm">
+        <LoginForm
+          onSubmit={(idLector) => {
+            void navigate({ to: "/recomendar/$idLector", params: { idLector } });
+          }}
+        />
+      </div>
     </main>
   );
 }
