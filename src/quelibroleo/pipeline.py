@@ -25,6 +25,7 @@ from .metrics import (
     paired_bootstrap_delta,
     recall_at_k,
     retrieval_metrics,
+    rows_against_reference,
     segment_metrics,
 )
 from .ranker import LambdaRanker
@@ -382,11 +383,22 @@ def train_ranker_from_history(
                     "stage": "retrieval",
                     "ablation": f"without_{source}",
                     "ndcg_at_20": metrics.oracle_ndcg,
+                    "features": None,
                     "recall": metrics.recall,
                 }
             )
-        ablation_metrics = (
-            feature_ablations.to_dict(orient="records") + source_ablation_rows
+        _, full_fusion = built[-1]
+        full_retrieval = retrieval_metrics(
+            full_fusion.candidates,
+            materials[-1].target,
+        )
+        ablation_metrics = feature_ablations.to_dict(
+            orient="records"
+        ) + rows_against_reference(
+            source_ablation_rows,
+            stage="retrieval",
+            ndcg_at_20=full_retrieval.oracle_ndcg,
+            recall=full_retrieval.recall,
         )
     else:
         LOGGER.info("LambdaRank final entrenado; se omiten ablaciones repetidas")
@@ -745,9 +757,23 @@ def run_ablations(
             for token in ("recent_", "transition_", "same_last_", "publication_age")
         ),
     }
+    reference_columns = train_features.feature_columns
+    reference_ranker = LambdaRanker(
+        config.ranker,
+        random_state=config.random_seed,
+    ).fit(
+        FeatureSet(train_features.frame, reference_columns),
+        FeatureSet(validation_features.frame, reference_columns),
+    )
+    reference_score = ndcg_at_k(
+        reference_ranker.predict(
+            FeatureSet(validation_features.frame, reference_columns)
+        ),
+        validation_truth,
+    )
     rows = []
     for name, keep in groups.items():
-        columns = tuple(column for column in train_features.feature_columns if keep(column))
+        columns = tuple(column for column in reference_columns if keep(column))
         train_subset = FeatureSet(train_features.frame, columns)
         validation_subset = FeatureSet(validation_features.frame, columns)
         ranker = LambdaRanker(
@@ -761,6 +787,14 @@ def run_ablations(
                 "ablation": name,
                 "ndcg_at_20": score,
                 "features": len(columns),
+                "recall": None,
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(
+        rows_against_reference(
+            rows,
+            stage="ranker",
+            ndcg_at_20=reference_score,
+            features=float(len(reference_columns)),
+        )
+    )

@@ -68,15 +68,20 @@ tipos de fila y ambos usan el último fold interno, no el holdout oficial.
 
 | `stage` | `ablation` | Interpretación |
 | --- | --- | --- |
+| cualquiera | `full` | Referencia de ese bloque, en el mismo fold. Los deltas de las otras filas se restan contra esta. |
 | `ranker` | `without_retrieval` | Reentrena LambdaRank sin scores, ranks ni señales de las fuentes. `ndcg_at_20` es el ranking resultante y `features` cuenta las variables conservadas. |
 | `ranker` | `without_sequence` | Reentrena sin recencia, transiciones, coincidencia con el último autor o género, ni antigüedad de publicación. |
 | `retrieval` | `without_<fuente>` | Quita esa fuente antes de fusionar candidatos. No reentrena el ranker: `recall` y `ndcg_at_20` describen el conjunto candidato y su techo oracle. |
 
-`without_als` con recall menor que las demás filas indica que ALS aporta
-positivos que las otras fuentes no recuperan. Una ablación con métrica mayor no
-significa que la fuente perjudique el ranking final; solo indica que, en ese
-fold y con los pesos y el corte fijos, la fusión sin ella dejó un conjunto
-candidato con mejor cobertura.
+`full` de retrieval es el conjunto con todas las fuentes. Es el mismo número que
+el último fold de `retrieval_folds.csv`. `delta_ndcg_at_20` y `delta_recall` son
+la fila menos esa referencia: negativo quiere decir que sacar la fuente empeoró
+el conjunto. `full` de ranker reentrena con todas las features y los mismos
+hiperparámetros fijos que las otras filas de ranker; no es el NDCG del hold-out.
+
+`without_als` con delta de recall negativo indica que ALS aporta positivos que
+las otras fuentes no recuperan. Una ablación no se compara con las otras filas
+`without_*`: se compara con `full`.
 
 ## `feature_importance.csv`
 

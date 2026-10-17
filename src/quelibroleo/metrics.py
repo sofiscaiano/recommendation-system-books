@@ -154,6 +154,42 @@ def retrieval_metrics(
     )
 
 
+def rows_against_reference(
+    rows: list[dict[str, object]],
+    *,
+    stage: str,
+    ndcg_at_20: float,
+    recall: float | None = None,
+    features: float | None = None,
+) -> list[dict[str, object]]:
+    """Antepone la referencia y resta sus métricas a cada ablación.
+
+    El delta es ablación menos referencia: negativo significa que sacar esa
+    fuente o esa familia dejó un resultado peor.
+    """
+
+    reference: dict[str, object] = {
+        "stage": stage,
+        "ablation": "full",
+        "ndcg_at_20": ndcg_at_20,
+        "features": features,
+        "recall": recall,
+        "delta_ndcg_at_20": 0.0,
+        "delta_recall": 0.0 if recall is not None else None,
+    }
+    compared = [reference]
+    for row in rows:
+        item = dict(row)
+        item["delta_ndcg_at_20"] = float(row["ndcg_at_20"]) - ndcg_at_20
+        row_recall = row.get("recall")
+        if recall is None or row_recall is None:
+            item["delta_recall"] = None
+        else:
+            item["delta_recall"] = float(row_recall) - recall
+        compared.append(item)
+    return compared
+
+
 def recall_at_k(
     recommendations: pd.DataFrame,
     truth: pd.DataFrame,

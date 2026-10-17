@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from quelibroleo.metrics import ndcg_at_k, retrieval_metrics, segment_metrics
+from quelibroleo.metrics import (
+    ndcg_at_k,
+    retrieval_metrics,
+    rows_against_reference,
+    segment_metrics,
+)
 
 
 def test_ndcg_penalizes_relevant_items_not_retrieved() -> None:
@@ -111,3 +116,26 @@ def test_segment_metrics_include_retrieval_coverage_and_tail() -> None:
     assert "long_tail_exposure_at_20" in report["activity_q1"]
     assert "catalog_coverage_at_20" in report["activity_q1"]
     assert report["single_date_history"]["users"] >= 2
+
+
+def test_ablation_rows_include_the_reference_and_the_drop() -> None:
+    rows = rows_against_reference(
+        [
+            {
+                "stage": "retrieval",
+                "ablation": "without_als",
+                "ndcg_at_20": 0.4,
+                "features": None,
+                "recall": 0.3,
+            }
+        ],
+        stage="retrieval",
+        ndcg_at_20=0.5,
+        recall=0.45,
+    )
+
+    assert [row["ablation"] for row in rows] == ["full", "without_als"]
+    assert rows[0]["delta_ndcg_at_20"] == 0.0
+    assert rows[0]["delta_recall"] == 0.0
+    assert abs(float(rows[1]["delta_ndcg_at_20"]) - -0.1) < 1e-12
+    assert abs(float(rows[1]["delta_recall"]) - -0.15) < 1e-12
