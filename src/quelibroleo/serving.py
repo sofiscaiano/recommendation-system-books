@@ -368,8 +368,6 @@ def _retrievers_for(config: PipelineConfig) -> list[Any]:
     retrieval = config.retrieval
     return build_default_retrievers(
         random_state=config.random_seed,
-        svd_factors=retrieval.svd_factors,
-        svd_epochs=retrieval.svd_epochs,
         implicit_factors=retrieval.implicit_factors,
         implicit_iterations=retrieval.implicit_iterations,
         half_life_days=retrieval.recency_half_life_days,

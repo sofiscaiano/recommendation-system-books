@@ -89,8 +89,6 @@ def _make_retrievers(config: PipelineConfig) -> list[Any]:
     retrieval = config.retrieval
     return build_default_retrievers(
         random_state=config.random_seed,
-        svd_factors=retrieval.svd_factors,
-        svd_epochs=retrieval.svd_epochs,
         implicit_factors=retrieval.implicit_factors,
         implicit_iterations=retrieval.implicit_iterations,
         half_life_days=retrieval.recency_half_life_days,
@@ -203,11 +201,34 @@ def _retain_latest_caches(cache_dir: Path, command: str, used: set[Path]) -> Non
             path.unlink()
 
 
+def _active_source_names(config: PipelineConfig) -> tuple[str, ...]:
+    return tuple(retriever.source_name for retriever in _make_retrievers(config))
+
+
+def _weights_for_active_sources(
+    weights: dict[str, float],
+    config: PipelineConfig,
+) -> dict[str, float]:
+    """Descarta pesos de fuentes que el pipeline ya no entrena."""
+
+    active = set(_active_source_names(config))
+    kept = {source: weight for source, weight in weights.items() if source in active}
+    dropped = sorted(set(weights) - active)
+    if dropped:
+        LOGGER.info(
+            "Se ignoran pesos de fuentes inactivas: %s",
+            ", ".join(dropped),
+        )
+    if not kept:
+        raise ValueError("No hay pesos para las fuentes activas")
+    return kept
+
+
 def _fusion_from_config(config: PipelineConfig) -> tuple[CandidateFusion, int]:
     retrieval = config.retrieval
     return (
         CandidateFusion(
-            weights=retrieval.source_weights,
+            weights=_weights_for_active_sources(retrieval.source_weights, config),
             rrf_k=retrieval.rrf_k,
         ),
         retrieval.rrf_cutoff,
@@ -317,7 +338,7 @@ def train_ranker_from_history(
         overrides = selection.ranker
     elif saved is not None and saved.ranker:
         fusion = CandidateFusion(
-            weights=saved.weights,
+            weights=_weights_for_active_sources(saved.weights, config),
             rrf_k=config.retrieval.rrf_k,
         )
         cutoff = saved.rrf_cutoff

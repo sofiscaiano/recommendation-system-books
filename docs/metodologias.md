@@ -24,41 +24,27 @@ red de seguridad cuando las fuentes personalizadas no cubren al usuario.
 
 Librerías: pandas.
 
-### Item-item por coseno (dos variantes)
+### Item-item por coseno
 
-`ItemCosineRetriever` (`src/quelibroleo/retrieval.py`).
+`ItemCosineRetriever` (`src/quelibroleo/retrieval.py`), en modo
+`occurrence` (`item_cosine`).
 
 Construye una matriz dispersa ítem × usuario y normaliza cada fila a norma L2.
 El score de un candidato es el producto interno entre el perfil del lector y el
 vector del ítem. No se materializa la matriz cuadrada ítem × ítem: el score se
-calcula como `(perfil · vectores_ítem) · vectores_ítemᵀ`.
-
-- **occurrence** (`item_cosine`): el peso de cada lectura es
-  `rating / 10` por un factor de recencia.
-- **adjusted** (`item_adjusted_cosine`): el peso es el rating centrado en la
-  media del lector (coseno ajustado). No usa recencia.
+calcula como `(perfil · vectores_ítem) · vectores_ítemᵀ`. El peso de cada
+lectura es `rating / 10` por un factor de recencia.
 
 La recencia es una semivida exponencial: si `half_life_days` es 365, una
 lectura de un año antes del último evento del lector pesa la mitad
 (`2^(-edad_en_días / semivida)`).
 
+El modo `adjusted` (rating centrado en la media del lector, sin recencia) sigue
+en la clase, pero no entra al pipeline: en la ablación del último fold, quitarlo
+dejaba el recall y el oracle del conjunto candidato en el mismo valor.
+
 Librerías: NumPy, SciPy (`scipy.sparse.csr_matrix`), scikit-learn
 (`sklearn.preprocessing.normalize`), pandas.
-
-### SVD explícito
-
-`SurpriseSVDRetriever`.
-
-Factoriza la matriz de ratings observados (escala 1–10) con el SVD sesgado de
-Funk / Koren. El score predicho de un par usuario–ítem es
-
-`μ + b_u + b_i + p_u · q_i`
-
-con media global, sesgos y factores latentes (por defecto 64 factores y 20
-épocas). Solo puntúa ítems y usuarios vistos en el trainset.
-
-Librería: [scikit-surprise](https://surpriselib.com/) (`surprise.SVD`,
-`Dataset`, `Reader`), más NumPy y pandas.
 
 ### Factorización implícita: ALS y BPR
 
@@ -108,8 +94,8 @@ evidencia, y pelearía con el peso por la misma decisión.
    tan atrás no puede entrar al top mergeado. La profundidad es
    `(C + k) * n_fuentes - k`, con pesos parejos. Así, los C primeros de una
    sola fuente le ganan a un libro que en todas las fuentes aparece recién
-   después de ese puesto. Con 7 fuentes y `k = 60`, un corte de 200 lee 1.760
-   por fuente; si la búsqueda lleva el corte a 1.000, lee 7.360. Durante el
+   después de ese puesto. Con 5 fuentes y `k = 60`, un corte de 200 lee 1.240
+   por fuente; si la búsqueda lleva el corte a 1.000, lee 5.240. Durante el
    study se lee una sola vez, a la profundidad del corte más grande, y cada
    trial corta el ranking ya fusionado.
 2. Esos rankings se combinan con Reciprocal Rank Fusion ponderado (Cormack,
@@ -123,7 +109,7 @@ evidencia, y pelearía con el peso por la misma decisión.
    término. Los pesos se normalizan para sumar 1. Escalarlos a todos por una
    constante no cambia el orden, y un árbol tampoco parte distinto `rrf_score`
    si solo cambia la escala. Los pesos por defecto, antes de normalizar, son
-   0,5 (popularidad), 1,0 (cosenos, SVD, ALS, BPR) y 0,8 (TF-IDF).
+   0,5 (popularidad), 1,0 (coseno, ALS, BPR) y 0,8 (TF-IDF).
 3. El corte `rrf_cutoff` se aplica solo después del merge: se queda con los
    primeros C libros de ese ranking (`rrf_score` descendente, desempate por
    `id_libro`). No recorta las listas de cada fuente. Un corte mayor es un

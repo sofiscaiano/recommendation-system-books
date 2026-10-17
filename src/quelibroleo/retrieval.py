@@ -526,24 +526,21 @@ class TfidfRetriever:
 def build_default_retrievers(
     *,
     random_state: int = 42,
-    svd_factors: int = 64,
-    svd_epochs: int = 20,
     implicit_factors: int = 64,
     implicit_iterations: int = 20,
     half_life_days: float = 365.0,
     tfidf_max_features: int = 60_000,
 ) -> list[Retriever]:
-    """Crea las fuentes acordadas con parámetros homogéneos."""
+    """Crea las fuentes que la ablación dejó en el pipeline.
+
+    SVD y el coseno ajustado siguen implementados, pero no se entrenan: en el
+    último fold, sacar SVD subía el recall del conjunto candidato y sacar el
+    coseno ajustado lo dejaba igual.
+    """
 
     return [
         PopularityRecommender(),
         ItemCosineRetriever("occurrence", half_life_days=half_life_days),
-        ItemCosineRetriever("adjusted", half_life_days=half_life_days),
-        SurpriseSVDRetriever(
-            factors=svd_factors,
-            epochs=svd_epochs,
-            random_state=random_state,
-        ),
         ImplicitMFRetriever(
             "als",
             factors=implicit_factors,

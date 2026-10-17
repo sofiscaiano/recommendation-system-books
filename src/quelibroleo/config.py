@@ -65,9 +65,6 @@ class RetrievalConfig:
     rrf_cutoff: int = 200
     rrf_k: float = 60.0
     recency_half_life_days: float = 365.0
-    item_knn_mode: tuple[str, ...] = ("occurrence", "adjusted")
-    svd_factors: int = 64
-    svd_epochs: int = 20
     implicit_factors: int = 64
     implicit_iterations: int = 20
     tfidf_max_features: int = 60_000
@@ -75,8 +72,6 @@ class RetrievalConfig:
         default_factory=lambda: {
             "popularidad": 0.5,
             "item_cosine": 1.0,
-            "item_adjusted_cosine": 1.0,
-            "svd": 1.0,
             "als": 1.0,
             "bpr": 1.0,
             "tfidf": 0.8,
