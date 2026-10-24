@@ -50,6 +50,13 @@ LabelGainOption = Annotated[
         help="Ganancia de LambdaRank: linear (0..10) o exponential (2^rel-1). Cambiarla exige --tune",
     ),
 ]
+ModelOption = Annotated[
+    str,
+    typer.Option(
+        "--model",
+        help="Algoritmo. El corte train/val/test y la entrega no cambian",
+    ),
+]
 
 
 def _configure_logging(artifacts: Path) -> None:
@@ -73,6 +80,7 @@ def _config(
     seed: int,
     note: str,
     label_gain: str,
+    model: str,
 ) -> PipelineConfig:
     base = PipelineConfig()
     return replace(
@@ -83,6 +91,7 @@ def _config(
         artifacts_dir=artifacts,
         random_seed=seed,
         run_note=note,
+        model=model,
         ranker=replace(base.ranker, label_gain=label_gain),
     )
 
@@ -98,14 +107,16 @@ def _run(
     seed: int,
     note: str,
     label_gain: str,
+    model: str,
 ) -> None:
     if not note.strip():
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
-    config = _config(db, example, output, artifacts, seed, note, label_gain)
+    config = _config(db, example, output, artifacts, seed, note, label_gain, model)
     logging.getLogger(__name__).info(
-        "Comando %s (tune=%s). Log en %s",
+        "Comando %s (model=%s, tune=%s). Log en %s",
         command,
+        model,
         tune,
         artifacts / "run.log",
     )
@@ -128,6 +139,7 @@ def main(
     seed: SeedOption = 42,
     note: NoteOption = "",
     label_gain: LabelGainOption = "linear",
+    model: ModelOption = "two_stage",
 ) -> None:
     """Sin subcomando, evalúa con el tuneo guardado o con los valores fijos."""
 
@@ -142,6 +154,7 @@ def main(
             seed=seed,
             note=note,
             label_gain=label_gain,
+            model=model,
         )
 
 
@@ -155,6 +168,7 @@ def evaluate(
     seed: SeedOption = 42,
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
+    model: ModelOption = "two_stage",
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
 
@@ -168,6 +182,7 @@ def evaluate(
         seed=seed,
         note=note,
         label_gain=label_gain,
+        model=model,
     )
 
 
@@ -181,6 +196,7 @@ def submit(
     seed: SeedOption = 42,
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
+    model: ModelOption = "two_stage",
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
 
@@ -194,6 +210,7 @@ def submit(
         seed=seed,
         note=note,
         label_gain=label_gain,
+        model=model,
     )
 
 
@@ -207,6 +224,7 @@ def run_all(
     seed: SeedOption = 42,
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
+    model: ModelOption = "two_stage",
 ) -> None:
     """Evalúa y después genera la entrega."""
 
@@ -220,6 +238,7 @@ def run_all(
         seed=seed,
         note=note,
         label_gain=label_gain,
+        model=model,
     )
 
 

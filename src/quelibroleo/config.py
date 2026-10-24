@@ -155,6 +155,7 @@ class PipelineConfig:
     output_path: Path = Path("submission.csv")
     random_seed: int = 42
     run_note: str = ""
+    model: str = "two_stage"
     optuna_trials: int = 30
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)

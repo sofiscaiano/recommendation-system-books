@@ -14,7 +14,14 @@ import pandas as pd
 
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
-from .data import ITEM_COL, USER_COL, load_dataset, observed_catalog
+from .data import ITEM_COL, observed_catalog
+from .experiment import (
+    Experiment,
+    fill_submission,
+    load_experiment,
+    seen_history,
+    validation_folds,
+)
 from .features import FeatureBuilder, FeatureSet, attach_relevance
 from .metrics import (
     ndcg_at_k,
@@ -31,7 +38,6 @@ from .retrieval import (
     per_source_depth,
     retrieve_all,
 )
-from .splits import leave_last_k, rolling_origin_folds
 from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
 
 LOGGER = logging.getLogger(__name__)
@@ -202,13 +208,7 @@ def train_ranker_from_history(
 ) -> TrainedPipeline:
     """Entrena LambdaRank exclusivamente con pseudo-futuros rolling."""
 
-    split_config = config.split
-    folds = rolling_origin_folds(
-        interactions,
-        n_folds=split_config.rolling_folds,
-        horizon=split_config.rolling_horizon,
-        min_history=split_config.min_history,
-    )
+    folds = validation_folds(interactions, config)
     if len(folds) < 2:
         raise ValueError("Se requieren al menos dos folds rolling para entrenar")
 
@@ -402,7 +402,7 @@ def evaluate(
     *,
     tune: bool = False,
     save_artifacts: bool = True,
-) -> tuple[EvaluationReport, TrainedPipeline]:
+) -> tuple[EvaluationReport, TrainedPipeline | None]:
     """Evalúa una sola vez sobre el leave-last-20 exterior."""
 
     from .tracking import log_evaluation, log_summary_artifacts, track_command
@@ -421,45 +421,34 @@ def _evaluate(
     *,
     tune: bool,
     save_artifacts: bool,
-) -> tuple[EvaluationReport, TrainedPipeline]:
-    bundle = load_dataset(config.db_path)
-    interactions = bundle.interactions
-    outer = leave_last_k(interactions, k=config.split.holdout_k)
+) -> tuple[EvaluationReport, TrainedPipeline | None]:
+    from .models import build_model
+
+    experiment = load_experiment(config, holdout=True)
     LOGGER.info(
         "Holdout listo: %s usuarios y %s interacciones de test",
-        len(outer.evaluation_users),
-        len(outer.test),
+        len(experiment.evaluation_users),
+        len(experiment.test),
     )
-    trained = train_ranker_from_history(
-        outer.train,
-        bundle.books,
-        config,
-        tune=tune,
-    )
-
-    popularity = PopularityRecommender().fit(
-        outer.train,
-        set(observed_catalog(outer.train, bundle.books)[ITEM_COL]),
-    )
-    baseline = popularity.recommend(
-        outer.evaluation_users,
-        outer.train,
-        n=20,
-    )
-    recommendations, fused, _ = _score_history(
-        trained,
-        outer.train,
-        outer.evaluation_users,
-        bundle.books,
-        config,
-    )
+    model = build_model(config.model, config)
+    model.fit(experiment, tune=tune)
+    recommendations = model.recommend(experiment.evaluation_users)
     LOGGER.info("Ranking del holdout completado")
     top20 = recommendations[recommendations["rank"] <= 20].copy()
 
-    baseline_per_user = ndcg_per_user(baseline, outer.test)
-    model_per_user = ndcg_per_user(top20, outer.test)
-    retrieval = retrieval_metrics(fused.candidates, outer.test)
-    submit_ids = _submit_user_ids(config)
+    popularity = PopularityRecommender().fit(
+        experiment.history,
+        set(observed_catalog(experiment.history, experiment.books)[ITEM_COL]),
+    )
+    baseline = popularity.recommend(
+        experiment.evaluation_users,
+        experiment.history,
+        n=20,
+    )
+    baseline_per_user = ndcg_per_user(baseline, experiment.test)
+    model_per_user = ndcg_per_user(top20, experiment.test)
+    recall, oracle, budget = _retrieval_of(model, experiment)
+    submit_ids = set(experiment.submit_users)
     submit_model, submit_users = _mean_for(model_per_user, submit_ids)
     submit_baseline, _ = _mean_for(baseline_per_user, submit_ids)
     report = EvaluationReport(
@@ -468,10 +457,10 @@ def _evaluate(
         submit_users=submit_users,
         model_ndcg_at_20=float(model_per_user.mean()),
         baseline_ndcg_at_20=float(baseline_per_user.mean()),
-        retrieval_recall=retrieval.recall,
-        retrieval_oracle_ndcg_at_20=retrieval.oracle_ndcg,
-        candidate_budget=trained.rrf_cutoff,
-        evaluation_users=len(outer.evaluation_users),
+        retrieval_recall=recall,
+        retrieval_oracle_ndcg_at_20=oracle,
+        candidate_budget=budget,
+        evaluation_users=len(experiment.evaluation_users),
     )
 
     if save_artifacts:
@@ -485,32 +474,43 @@ def _evaluate(
             encoding="utf-8",
         )
         (artifacts / "data_quality.json").write_text(
-            json.dumps(with_run_name(asdict(bundle.report)), ensure_ascii=False, indent=2),
+            json.dumps(
+                with_run_name(asdict(experiment.quality)),
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         (artifacts / "evaluation.json").write_text(
             json.dumps(with_run_name(asdict(report)), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        _stamp_frame(pd.DataFrame(trained.fold_metrics)).to_csv(
-            artifacts / "retrieval_folds.csv", index=False
+        _stamp_frame(top20).to_csv(
+            artifacts / "evaluation_recommendations.csv", index=False
         )
-        _stamp_frame(top20).to_csv(artifacts / "evaluation_recommendations.csv", index=False)
-        _stamp_frame(trained.ranker.feature_importance()).to_csv(
-            artifacts / "feature_importance.csv", index=False
-        )
-        _stamp_frame(pd.DataFrame(trained.ablation_metrics)).to_csv(
-            artifacts / "feature_ablations.csv", index=False
-        )
-        joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
-    return report, trained
+        trained = getattr(model, "trained", None)
+        if isinstance(trained, TrainedPipeline):
+            _stamp_frame(pd.DataFrame(trained.fold_metrics)).to_csv(
+                artifacts / "retrieval_folds.csv", index=False
+            )
+            _stamp_frame(trained.ranker.feature_importance()).to_csv(
+                artifacts / "feature_importance.csv", index=False
+            )
+            _stamp_frame(pd.DataFrame(trained.ablation_metrics)).to_csv(
+                artifacts / "feature_ablations.csv", index=False
+            )
+            joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
+    trained = getattr(model, "trained", None)
+    return report, trained if isinstance(trained, TrainedPipeline) else None
 
 
-def _submit_user_ids(config: PipelineConfig) -> set[str]:
-    """Lectores de la entrega. El NDCG de submit solo promedia a los que tienen test."""
-
-    example = pd.read_csv(config.example_path, dtype=str)
-    return set(example[USER_COL].astype(str))
+def _retrieval_of(model: object, experiment: Experiment) -> tuple[float, float, int]:
+    fused = getattr(model, "fused", None)
+    trained = getattr(model, "trained", None)
+    if fused is None or not isinstance(trained, TrainedPipeline):
+        return 0.0, 0.0, 0
+    metrics = retrieval_metrics(fused.candidates, experiment.test)
+    return metrics.recall, metrics.oracle_ndcg, trained.rrf_cutoff
 
 
 def _mean_for(values: pd.Series, users: set[str]) -> tuple[float, int]:
@@ -531,32 +531,6 @@ def _stamp_frame(frame: pd.DataFrame) -> pd.DataFrame:
     stamped = frame.copy()
     stamped.insert(0, "run_name", run_name)
     return stamped
-
-
-def _fill_submission(
-    ranked: pd.DataFrame,
-    users: list[str],
-    history: pd.DataFrame,
-    popularity: PopularityRecommender,
-) -> pd.DataFrame:
-    top = ranked[ranked["rank"] <= 20][[USER_COL, ITEM_COL, "rank"]].copy()
-    existing = top.groupby(USER_COL)[ITEM_COL].agg(list).to_dict()
-    fallback = popularity.recommend(users, history, n=100)
-    fallback_by_user = fallback.groupby(USER_COL)[ITEM_COL].agg(list).to_dict()
-    seen_by_user = history.groupby(USER_COL)[ITEM_COL].agg(set).to_dict()
-    rows = []
-    for user in users:
-        chosen: list[str] = []
-        for item in existing.get(user, []) + fallback_by_user.get(user, []):
-            if item in seen_by_user.get(user, set()) or item in chosen:
-                continue
-            chosen.append(item)
-            if len(chosen) == 20:
-                break
-        if len(chosen) != 20:
-            raise RuntimeError(f"No se pudieron completar 20 libros para {user}")
-        rows.extend({USER_COL: user, ITEM_COL: item} for item in chosen)
-    return pd.DataFrame.from_records(rows, columns=[USER_COL, ITEM_COL])
 
 
 def train_final_and_submit(
@@ -582,35 +556,33 @@ def _submit(
     tune: bool,
     output_path: str | Path | None,
 ) -> pd.DataFrame:
-    bundle = load_dataset(config.db_path)
-    interactions = bundle.interactions
-    trained = train_ranker_from_history(
-        interactions,
-        bundle.books,
-        config,
-        tune=tune,
-        execute_ablations=False,
-    )
-    example = pd.read_csv(config.example_path, dtype=str)
-    users = list(dict.fromkeys(example[USER_COL].astype(str)))
-    ranked, _, _ = _score_history(
-        trained,
-        interactions,
-        tuple(users),
-        bundle.books,
-        config,
-    )
-    catalog = observed_catalog(interactions, bundle.books)
+    from .models import build_model
+
+    experiment = load_experiment(config, holdout=False)
+    model = build_model(config.model, config)
+    model.fit(experiment, tune=tune)
+    ranked = model.recommend(experiment.submit_users)
+    catalog = observed_catalog(experiment.history, experiment.books)
     popularity = PopularityRecommender().fit(
-        interactions,
+        experiment.history,
         set(catalog[ITEM_COL]),
     )
-    seen_history = pd.concat(
-        [interactions, bundle.invalid_interactions],
-        ignore_index=True,
-        sort=False,
+    submission = fill_submission(
+        ranked,
+        experiment.submit_users,
+        seen_history(experiment),
+        popularity,
     )
-    submission = _fill_submission(ranked, users, seen_history, popularity)
+    trained = getattr(model, "trained", None)
+    origin = trained.hyperparameters_origin if isinstance(trained, TrainedPipeline) else "default"
+    tuned_run = (
+        trained.hyperparameters_run_name if isinstance(trained, TrainedPipeline) else ""
+    )
+    hyperparameters = (
+        _hyperparameters_snapshot(trained)
+        if isinstance(trained, TrainedPipeline)
+        else {"model": model.name}
+    )
     from .tracking import archive_submission, write_run_marker
 
     destination = Path(output_path or config.output_path)
@@ -618,9 +590,9 @@ def _submit(
     submission.to_csv(destination, index=False)
     archived = archive_submission(
         destination,
-        origin=trained.hyperparameters_origin,
-        hyperparameters_run_name=trained.hyperparameters_run_name,
-        hyperparameters=_hyperparameters_snapshot(trained),
+        origin=origin,
+        hyperparameters_run_name=tuned_run,
+        hyperparameters=hyperparameters,
         note=config.run_note,
         seed=config.random_seed,
     )
@@ -629,8 +601,44 @@ def _submit(
     artifacts = Path(config.artifacts_dir)
     artifacts.mkdir(parents=True, exist_ok=True)
     write_run_marker(artifacts)
-    joblib.dump(trained, artifacts / "final_pipeline.joblib")
+    if isinstance(trained, TrainedPipeline):
+        joblib.dump(trained, artifacts / "final_pipeline.joblib")
     return submission
+
+
+class TwoStage:
+    """Retrieval + LambdaRank. La validación es el último fold rolling."""
+
+    name = "two_stage"
+
+    def __init__(self, config: PipelineConfig) -> None:
+        self.config = config
+        self.trained: TrainedPipeline | None = None
+        self.fused: FusionResult | None = None
+        self._experiment: Experiment | None = None
+
+    def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+        self._experiment = experiment
+        self.trained = train_ranker_from_history(
+            experiment.history,
+            experiment.books,
+            self.config,
+            tune=tune,
+            execute_ablations=experiment.holdout,
+        )
+
+    def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        if self.trained is None or self._experiment is None:
+            raise RuntimeError("El modelo debe entrenarse antes de recomendar")
+        recommendations, fused, _ = _score_history(
+            self.trained,
+            self._experiment.history,
+            tuple(users),
+            self._experiment.books,
+            self.config,
+        )
+        self.fused = fused
+        return recommendations
 
 
 def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:

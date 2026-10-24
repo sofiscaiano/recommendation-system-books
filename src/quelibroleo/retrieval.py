@@ -196,110 +196,6 @@ class ItemCosineRetriever:
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
 
 
-class SurpriseSVDRetriever:
-    """Factorización explícita de ratings mediante Surprise SVD."""
-
-    source_name = "svd"
-
-    def __init__(
-        self,
-        *,
-        factors: int = 64,
-        epochs: int = 20,
-        random_state: int = 42,
-    ) -> None:
-        self.factors = factors
-        self.epochs = epochs
-        self.random_state = random_state
-        self.model_: object | None = None
-        self.trainset_: object | None = None
-        self.item_ids_: np.ndarray | None = None
-
-    def fit(
-        self,
-        interactions: pd.DataFrame,
-        catalog: pd.DataFrame,
-    ) -> SurpriseSVDRetriever:
-        try:
-            from surprise import SVD, Dataset, Reader
-        except ImportError as exc:
-            raise ImportError(
-                "SurpriseSVDRetriever requiere `scikit-surprise>=1.1.5`"
-            ) from exc
-
-        eligible = set(catalog[ITEM_COL].astype(str))
-        fit_data = interactions[interactions[ITEM_COL].isin(eligible)]
-        reader = Reader(rating_scale=(1, 10))
-        dataset = Dataset.load_from_df(
-            fit_data[[USER_COL, ITEM_COL, RATING_COL]],
-            reader,
-        )
-        trainset = dataset.build_full_trainset()
-        model = SVD(
-            n_factors=self.factors,
-            n_epochs=self.epochs,
-            random_state=self.random_state,
-        )
-        model.fit(trainset)
-        self.model_ = model
-        self.trainset_ = trainset
-        self.item_ids_ = np.array(sorted(eligible), dtype=object)
-        return self
-
-    def recommend(
-        self,
-        users: list[str] | tuple[str, ...],
-        history: pd.DataFrame,
-        n: int,
-    ) -> pd.DataFrame:
-        if self.model_ is None or self.trainset_ is None or self.item_ids_ is None:
-            raise RuntimeError("El retriever debe entrenarse antes de recomendar")
-        model = self.model_
-        trainset = self.trainset_
-        known_raw_items = [
-            item
-            for item in self.item_ids_
-            if item in trainset._raw2inner_id_items
-        ]
-        inner_items = np.array(
-            [trainset.to_inner_iid(item) for item in known_raw_items], dtype=int
-        )
-        raw_items = np.array(known_raw_items, dtype=object)
-        seen_by_user = history.groupby(USER_COL)[ITEM_COL].agg(set).to_dict()
-        rows: list[dict[str, object]] = []
-        known_users: list[tuple[str, int]] = []
-        for user in users:
-            try:
-                inner_user = trainset.to_inner_uid(user)
-            except ValueError:
-                continue
-            known_users.append((str(user), inner_user))
-
-        item_factors = model.qi[inner_items]
-        item_bias = model.bi[inner_items]
-        for start in range(0, len(known_users), 128):
-            batch = known_users[start : start + 128]
-            batch_indices = np.array([inner for _, inner in batch], dtype=int)
-            batch_scores = (
-                model.pu[batch_indices] @ item_factors.T
-                + model.bu[batch_indices, None]
-                + item_bias[None, :]
-                + trainset.global_mean
-            )
-            for row_index, (user, _) in enumerate(batch):
-                rows.extend(
-                    _rank_scores(
-                        user,
-                        raw_items,
-                        batch_scores[row_index],
-                        self.source_name,
-                        n,
-                        set(seen_by_user.get(user, set())),
-                    )
-                )
-        return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
-
-
 class ImplicitMFRetriever:
     """ALS o BPR sobre ocurrencia ponderada por rating y recencia."""
 
@@ -531,12 +427,7 @@ def build_default_retrievers(
     half_life_days: float = 365.0,
     tfidf_max_features: int = 60_000,
 ) -> list[Retriever]:
-    """Crea las fuentes que la ablación dejó en el pipeline.
-
-    SVD y el coseno ajustado siguen implementados, pero no se entrenan: en el
-    último fold, sacar SVD subía el recall del conjunto candidato y sacar el
-    coseno ajustado lo dejaba igual.
-    """
+    """Fuentes activas: popularidad, coseno, ALS, BPR y TF-IDF."""
 
     return [
         PopularityRecommender(),

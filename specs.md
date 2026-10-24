@@ -106,11 +106,15 @@ Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,
 Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelibroleo/` y `main.py`.
 
 ```bash
-uv run python main.py evaluate --note "qué se está probando"
+uv run python main.py evaluate --model two_stage --note "qué se está probando"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
 uv run python main.py export-serving
 ```
+
+`--model` elige el algoritmo (`two_stage` o `popularity`). Train, folds de
+validación y test salen siempre de `experiment.py`. La entrega sigue siendo
+`submission.csv` con los lectores de `ejemplo.csv`.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 

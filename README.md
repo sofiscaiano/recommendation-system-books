@@ -40,6 +40,21 @@ uv run python main.py evaluate --note "qué se está probando"
 uv run python main.py submit --note "qué se está entregando"
 ```
 
+El algoritmo se elige con `--model`. El corte no: train, los tres folds de
+validación y el test de las últimas 20 son los de `experiment.py` para
+cualquier modelo. `submit` reentrena con toda la historia y escribe el mismo
+`submission.csv`.
+
+```bash
+uv run python main.py evaluate --model two_stage --note "pipeline actual"
+uv run python main.py evaluate --model popularity --note "baseline"
+```
+
+Un modelo nuevo implementa `fit(experiment)` y `recommend(users)` y se registra
+en `build_model` (`src/quelibroleo/models.py`). `experiment.history` es el
+train, `experiment.test` el hold-out y `validation_folds` los cortes internos;
+el último fold es la validación.
+
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
 costosa:
 

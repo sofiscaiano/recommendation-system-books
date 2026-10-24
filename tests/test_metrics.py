@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from quelibroleo.metrics import (
-    ndcg_at_k,
-    retrieval_metrics,
-    rows_against_reference,
-    segment_metrics,
-)
+from quelibroleo.metrics import ndcg_at_k, retrieval_metrics, rows_against_reference
 
 
 def test_ndcg_penalizes_relevant_items_not_retrieved() -> None:
@@ -57,65 +52,6 @@ def test_retrieval_metrics_report_binary_weighted_and_oracle() -> None:
     assert metrics.recall == 0.5
     assert metrics.weighted_recall == 10 / 12
     assert 0 < metrics.oracle_ndcg < 1
-
-
-def test_segment_metrics_include_retrieval_coverage_and_tail() -> None:
-    train = pd.DataFrame(
-        {
-            "id_lector": (
-                ["u0"]
-                + ["u1"] * 2
-                + ["u2"] * 6
-                + ["u3"] * 12
-            ),
-            "id_libro": [f"seen-{i}" for i in range(21)],
-            "fecha": pd.to_datetime(["2020-01-01"] * 21),
-            "rating": [8] * 21,
-        }
-    )
-    truth = pd.DataFrame(
-        {
-            "id_lector": ["u0", "u0", "u1", "u2", "u3", "u3"],
-            "id_libro": [
-                "hit",
-                "miss-light",
-                "hit",
-                "hit",
-                "hit",
-                "miss-heavy",
-            ],
-            "rating": [10, 8, 9, 9, 10, 8],
-        }
-    )
-    recommendations = pd.DataFrame(
-        {
-            "id_lector": ["u0", "u0", "u1", "u2", "u3", "u3"],
-            "id_libro": ["hit", "other", "hit", "hit", "hit", "other"],
-            "rank": [1, 2, 1, 1, 1, 2],
-        }
-    )
-    candidates = pd.DataFrame(
-        {
-            "id_lector": ["u0", "u0", "u1", "u2", "u3"],
-            "id_libro": ["hit", "miss-light", "hit", "hit", "hit"],
-        }
-    )
-    eligible = set(train["id_libro"]) | {"hit", "miss-light", "miss-heavy", "other"}
-
-    report = segment_metrics(
-        recommendations,
-        candidates,
-        truth,
-        train,
-        eligible,
-        k=2,
-    )
-
-    assert report["activity_q1"]["retrieval_recall"] == 1.0
-    assert report["activity_q4"]["retrieval_recall"] == 0.5
-    assert "long_tail_exposure_at_20" in report["activity_q1"]
-    assert "catalog_coverage_at_20" in report["activity_q1"]
-    assert report["single_date_history"]["users"] >= 2
 
 
 def test_ablation_rows_include_the_reference_and_the_drop() -> None:
