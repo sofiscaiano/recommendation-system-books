@@ -43,6 +43,13 @@ NoteOption = Annotated[
         help="Descripción obligatoria de esta corrida",
     ),
 ]
+LabelGainOption = Annotated[
+    str,
+    typer.Option(
+        "--label-gain",
+        help="Ganancia de LambdaRank: linear (0..10) o exponential (2^rel-1). Cambiarla exige --tune",
+    ),
+]
 
 
 def _configure_logging(artifacts: Path) -> None:
@@ -65,15 +72,18 @@ def _config(
     artifacts: Path,
     seed: int,
     note: str,
+    label_gain: str,
 ) -> PipelineConfig:
+    base = PipelineConfig()
     return replace(
-        PipelineConfig(),
+        base,
         db_path=db,
         example_path=example,
         output_path=output,
         artifacts_dir=artifacts,
         random_seed=seed,
         run_note=note,
+        ranker=replace(base.ranker, label_gain=label_gain),
     )
 
 
@@ -87,11 +97,12 @@ def _run(
     tune: bool,
     seed: int,
     note: str,
+    label_gain: str,
 ) -> None:
     if not note.strip():
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
-    config = _config(db, example, output, artifacts, seed, note)
+    config = _config(db, example, output, artifacts, seed, note, label_gain)
     logging.getLogger(__name__).info(
         "Comando %s (tune=%s). Log en %s",
         command,
@@ -116,6 +127,7 @@ def main(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = "",
+    label_gain: LabelGainOption = "linear",
 ) -> None:
     """Sin subcomando, evalúa con el tuneo guardado o con los valores fijos."""
 
@@ -129,6 +141,7 @@ def main(
             tune=tune,
             seed=seed,
             note=note,
+            label_gain=label_gain,
         )
 
 
@@ -141,6 +154,7 @@ def evaluate(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
+    label_gain: LabelGainOption = "linear",
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
 
@@ -153,6 +167,7 @@ def evaluate(
         tune=tune,
         seed=seed,
         note=note,
+        label_gain=label_gain,
     )
 
 
@@ -165,6 +180,7 @@ def submit(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
+    label_gain: LabelGainOption = "linear",
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
 
@@ -177,6 +193,7 @@ def submit(
         tune=tune,
         seed=seed,
         note=note,
+        label_gain=label_gain,
     )
 
 
@@ -189,6 +206,7 @@ def run_all(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
+    label_gain: LabelGainOption = "linear",
 ) -> None:
     """Evalúa y después genera la entrega."""
 
@@ -201,6 +219,7 @@ def run_all(
         tune=tune,
         seed=seed,
         note=note,
+        label_gain=label_gain,
     )
 
 

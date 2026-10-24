@@ -414,6 +414,7 @@ def train_ranker_from_history(
                     {
                         "rrf_cutoff": cutoff,
                         "source_weights": weights,
+                        "label_gain": config.ranker.label_gain,
                         "ranker": overrides,
                     }
                 ),

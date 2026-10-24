@@ -148,9 +148,12 @@ Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
 ## `tuned_hyperparameters.json`
 
 Solo aparece si la corrida usó `--tune`. Guarda el corte del ranking de RRF,
-los pesos de cada fuente (normalizados para sumar 1) y los hiperparámetros de
-LambdaRank elegidos por Optuna. `evaluate` y `submit` sin `--tune` leen este
-archivo y entrenan con esos valores. Si no existe, usan la config fija de
+los pesos de cada fuente (normalizados para sumar 1), `label_gain` y los
+hiperparámetros de LambdaRank elegidos por Optuna. `label_gain` no se busca:
+queda el valor de esa corrida (`linear` si el archivo es anterior a este campo).
+`evaluate` y `submit` sin `--tune` leen este archivo y entrenan con esos
+valores. Si el `label_gain` de la corrida no coincide con el del archivo, el
+log avisa que hay que volver a buscar. Si no existe, usan la config fija de
 `PipelineConfig`. Un archivo generado con cuotas por fuente no sirve para esta
 fusión. Otra corrida con `--tune` vuelve a buscar y reemplaza el archivo.
 

@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from .config import PipelineConfig, search_ranges
+from .config import LABEL_GAIN_MODES, PipelineConfig, search_ranges
 from .metrics import ndcg_at_k
 from .retrieval import CandidateFusion
 
@@ -36,6 +36,7 @@ class TunedHyperparameters:
     weights: dict[str, float]
     ranker: dict[str, Any]
     run_name: str = ""
+    label_gain: str = "linear"
 
 
 def tuned_hyperparameters_path(artifacts_dir: Path) -> Path:
@@ -72,8 +73,11 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
             for key, value in _mapping(payload["ranker"], "ranker").items()
         }
         run_name = payload.get("run_name", "")
+        label_gain = payload.get("label_gain", "linear")
         if not isinstance(run_name, str):
             raise TypeError("run_name debe ser texto")
+        if not isinstance(label_gain, str) or label_gain not in LABEL_GAIN_MODES:
+            raise ValueError("label_gain debe ser 'linear' o 'exponential'")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Hiperparámetros inválidos en {path}") from exc
     if rrf_cutoff < 1 or not weights or not ranker:
@@ -83,6 +87,7 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         weights=weights,
         ranker=ranker,
         run_name=run_name,
+        label_gain=label_gain,
     )
 
 
@@ -93,11 +98,21 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
     if path.is_file():
         loaded = load_tuned_hyperparameters(path)
         LOGGER.info(
-            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s)",
+            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s)",
             path,
             loaded.run_name or "sin nombre",
             loaded.rrf_cutoff,
+            loaded.label_gain,
         )
+        if loaded.label_gain != config.ranker.label_gain:
+            LOGGER.warning(
+                "El tuneo guardado se eligió con label_gain=%s y esta corrida usa %s. "
+                "Esos hiperparámetros no corresponden a esta ganancia; "
+                "corré evaluate --tune --label-gain %s.",
+                loaded.label_gain,
+                config.ranker.label_gain,
+                config.ranker.label_gain,
+            )
         return loaded, "saved"
     LOGGER.info("Sin %s; se usan los hiperparámetros fijos", path)
     retrieval = config.retrieval

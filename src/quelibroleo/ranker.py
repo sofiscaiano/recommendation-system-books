@@ -8,9 +8,22 @@ from typing import Any
 import lightgbm as lgb
 import pandas as pd
 
-from .config import RankerConfig
+from .config import LABEL_GAIN_MODES, RankerConfig
 from .data import ITEM_COL, USER_COL
 from .features import FeatureSet
+
+LABEL_GAINS: dict[str, tuple[int, ...]] = {
+    "linear": tuple(range(11)),
+    "exponential": tuple(2**rating - 1 for rating in range(11)),
+}
+
+
+def label_gain_values(mode: str) -> list[int]:
+    """Ganancia por rating. `exponential` coincide con el NDCG de evaluación."""
+
+    if mode not in LABEL_GAIN_MODES:
+        raise ValueError("label_gain debe ser 'linear' o 'exponential'")
+    return list(LABEL_GAINS[mode])
 
 
 def _ordered_groups(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[int]]:
@@ -45,10 +58,11 @@ class LambdaRanker:
         values.pop("early_stopping_rounds")
         values.pop("search")
         values.update(self.overrides)
+        gain = label_gain_values(str(values.pop("label_gain")))
         return {
             "objective": "lambdarank",
             "metric": "ndcg",
-            "label_gain": list(range(11)),
+            "label_gain": gain,
             "lambdarank_truncation_level": 20,
             "verbosity": -1,
             "random_state": self.random_state,

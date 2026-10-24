@@ -52,6 +52,15 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 siguientes de `evaluate` y `submit` sin `--tune` entrenan con ese archivo. Si
 no existe, usan los hiperparámetros fijos.
 
+`--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
+0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra
+a Optuna. Cambiarla exige buscar de nuevo, porque el archivo guardado se eligió
+con la ganancia anterior:
+
+```bash
+uv run python main.py evaluate --tune --label-gain exponential --note "label_gain exponencial alineado con el NDCG"
+```
+
 `--note` es obligatorio. Ese texto queda como descripción de la corrida.
 
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`

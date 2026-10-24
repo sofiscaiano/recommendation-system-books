@@ -134,9 +134,13 @@ Librerías: NumPy y pandas. No hay una librería externa de RRF.
 LambdaRank entrena árboles de boosting para optimizar NDCG, no el error de
 rating. Cada lector es un grupo (`query_id`). Dentro del grupo, la etiqueta
 `relevance` es el rating futuro (1–10) si el candidato está en el hold-out, y
-0 si no. `label_gain` es la identidad `0..10`, así que un 10 aporta más al
-NDCG que un 1. `lambdarank_truncation_level` y `eval_at` están en 20, alineados
-con la métrica de entrega.
+0 si no. `label_gain` elige cuánto aporta cada rating y no entra a Optuna.
+`linear` (el defecto, y el de los tuneos ya guardados) es la identidad `0..10`.
+`exponential` es `2^rating - 1`, la misma ganancia que
+`sklearn.metrics.ndcg_score`. Se pasa con `--label-gain`. Cambiarlo deja
+desalineados los hiperparámetros guardados, así que la corrida correspondiente
+es `evaluate --tune --label-gain exponential`. `lambdarank_truncation_level` y
+`eval_at` están en 20, alineados con la métrica de entrega.
 
 Parámetros por defecto: 200 árboles, learning rate 0,04, 31 hojas, profundidad
 libre, `min_child_samples=30`, subsample y colsample 0,9, `reg_lambda=1`. Si

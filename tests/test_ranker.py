@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from quelibroleo.config import RankerConfig
 from quelibroleo.features import FeatureBuilder, attach_relevance
 from quelibroleo.ranker import LambdaRanker
+
+
+def test_label_gain_is_configurable_and_reaches_lightgbm() -> None:
+    linear = LambdaRanker(RankerConfig(label_gain="linear"))._parameters()
+    exponential = LambdaRanker(
+        RankerConfig(label_gain="exponential"),
+        overrides={"learning_rate": 0.05, "early_stopping_rounds": 30},
+    )._parameters()
+
+    assert linear["label_gain"] == list(range(11))
+    assert exponential["label_gain"] == [2**rating - 1 for rating in range(11)]
+    assert exponential["learning_rate"] == 0.05
+    assert exponential["objective"] == "lambdarank"
+    with pytest.raises(ValueError):
+        RankerConfig(label_gain="identity")
 
 
 def test_features_labels_and_lambdarank_roundtrip() -> None:

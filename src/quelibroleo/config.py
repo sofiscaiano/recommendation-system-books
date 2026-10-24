@@ -114,9 +114,18 @@ class RankerSearch:
     )
 
 
+LABEL_GAIN_MODES = ("linear", "exponential")
+
+
 @dataclass(frozen=True)
 class RankerConfig:
-    """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna."""
+    """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna.
+
+    `label_gain` no entra a la búsqueda. `linear` es la identidad 0..10.
+    `exponential` es `2^rating - 1`, la misma ganancia que
+    `sklearn.metrics.ndcg_score`. Cambiarlo pide un `--tune` nuevo: el archivo
+    guardado se eligió bajo la ganancia anterior.
+    """
 
     n_estimators: int = 200
     learning_rate: float = 0.04
@@ -128,7 +137,12 @@ class RankerConfig:
     reg_alpha: float = 0.0
     reg_lambda: float = 1.0
     early_stopping_rounds: int = 30
+    label_gain: str = "linear"
     search: RankerSearch = field(default_factory=RankerSearch)
+
+    def __post_init__(self) -> None:
+        if self.label_gain not in LABEL_GAIN_MODES:
+            raise ValueError("label_gain debe ser 'linear' o 'exponential'")
 
 
 @dataclass(frozen=True)

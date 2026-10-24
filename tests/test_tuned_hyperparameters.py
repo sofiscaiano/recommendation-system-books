@@ -41,7 +41,29 @@ def test_saved_file_is_reused(tmp_path) -> None:
     assert chosen.weights == {"svd": 1.4, "popularidad": 0.8}
     assert chosen.ranker["num_leaves"] == 33
     assert chosen.run_name == "20260923-evaluate-tune"
+    assert chosen.label_gain == "linear"
     assert load_tuned_hyperparameters(path).rrf_cutoff == 1000
+
+
+def test_saved_label_gain_is_kept(tmp_path) -> None:
+    path = tmp_path / "tuned_hyperparameters.json"
+    payload = _payload()
+    payload["label_gain"] = "exponential"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    chosen = load_tuned_hyperparameters(path)
+
+    assert chosen.label_gain == "exponential"
+
+
+def test_saved_label_gain_must_be_known(tmp_path) -> None:
+    path = tmp_path / "tuned_hyperparameters.json"
+    payload = _payload()
+    payload["label_gain"] = "identity"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="inválidos"):
+        load_tuned_hyperparameters(path)
 
 
 def test_quota_file_is_rejected(tmp_path) -> None:
