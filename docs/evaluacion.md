@@ -164,9 +164,5 @@ además de la salida en consola.
 
 ## Archivos que no son diagnósticos
 
-`artifacts/cache/` guarda candidatos intermedios para no repetir el retrieval.
-Al terminar `evaluate` o `submit` quedan solo los archivos de la última corrida
-de cada comando; el resto se borra. `last_evaluate.txt` y `last_submit.txt`
-listan esos nombres.
 `evaluated_pipeline.joblib` y `final_pipeline.joblib` guardan los modelos de la
 evaluación y de la entrega.
