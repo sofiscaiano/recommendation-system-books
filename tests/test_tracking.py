@@ -20,16 +20,13 @@ def test_track_command_requires_note() -> None:
 def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
     report = EvaluationReport(
-        baseline_ndcg_at_20=0.1,
+        submit_ndcg_at_20=0.11,
+        submit_baseline_ndcg_at_20=0.05,
+        submit_users=2,
         model_ndcg_at_20=0.2,
-        model_recall_at_20=0.3,
+        baseline_ndcg_at_20=0.1,
         retrieval_recall=0.4,
-        retrieval_weighted_recall=0.5,
         retrieval_oracle_ndcg_at_20=0.6,
-        catalog_coverage_at_20=0.7,
-        long_tail_exposure_at_20=0.8,
-        paired_delta={"mean": 0.1, "lower": 0.0, "upper": 0.2},
-        segments={"activity_q1": {"ndcg_at_20": 0.15}},
         candidate_budget=200,
         evaluation_users=3,
     )
@@ -42,9 +39,19 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
         run_id = mlflow.active_run().info.run_id
 
     stored = mlflow.tracking.MlflowClient().get_run(run_id)
+    assert stored.data.metrics["submit_ndcg_at_20"] == 0.11
     assert stored.data.metrics["model_ndcg_at_20"] == 0.2
-    assert stored.data.metrics["ndcg_lift_vs_popularity"] == 0.1
-    assert stored.data.metrics["paired_delta.mean"] == 0.1
+    assert set(stored.data.metrics) == {
+        "submit_ndcg_at_20",
+        "submit_baseline_ndcg_at_20",
+        "model_ndcg_at_20",
+        "baseline_ndcg_at_20",
+        "retrieval_recall",
+        "retrieval_oracle_ndcg_at_20",
+        "submit_users",
+        "evaluation_users",
+        "candidate_budget",
+    }
     assert stored.data.params["tune"] == "False"
     assert stored.data.params["command"] == "evaluate"
     assert stored.data.tags["mlflow.note.content"] == "hold-out de prueba"

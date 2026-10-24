@@ -29,7 +29,6 @@ _SUMMARY_ARTIFACTS = (
     "tuned_hyperparameters.json",
     "retrieval_folds.csv",
     "feature_ablations.csv",
-    "evaluation_segments.csv",
     "feature_importance.csv",
     "run.log",
 )
@@ -224,25 +223,22 @@ def _params(config: PipelineConfig, *, command: str, tune: bool) -> dict[str, st
     return flat
 
 
+_PUBLISHED_METRICS = (
+    "submit_ndcg_at_20",
+    "submit_baseline_ndcg_at_20",
+    "model_ndcg_at_20",
+    "baseline_ndcg_at_20",
+    "retrieval_recall",
+    "retrieval_oracle_ndcg_at_20",
+    "submit_users",
+    "evaluation_users",
+    "candidate_budget",
+)
+
+
 def _metrics(report: EvaluationReport) -> dict[str, float]:
     raw = asdict(report)
-    metrics: dict[str, float] = {}
-    for key, value in raw.items():
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            continue
-        metrics[key] = float(value)
-    delta = raw["paired_delta"]
-    for key, value in delta.items():
-        if isinstance(value, (int, float)):
-            metrics[f"paired_delta.{key}"] = float(value)
-    for segment, values in raw["segments"].items():
-        for key, value in values.items():
-            if isinstance(value, (int, float)):
-                metrics[f"segment.{segment}.{key}"] = float(value)
-    metrics["ndcg_lift_vs_popularity"] = (
-        report.model_ndcg_at_20 - report.baseline_ndcg_at_20
-    )
-    return metrics
+    return {key: float(raw[key]) for key in _PUBLISHED_METRICS}
 
 
 @contextmanager
@@ -314,40 +310,6 @@ def log_summary_artifacts(artifacts_dir: Path) -> None:
             mlflow.log_artifact(str(path))
 
 
-def _numeric_fields(value: Any) -> dict[str, float]:
-    from dataclasses import asdict, is_dataclass
-
-    if is_dataclass(value) and not isinstance(value, type):
-        value = asdict(value)
-    if not isinstance(value, dict):
-        return {}
-    fields: dict[str, float] = {}
-    for key, nested in value.items():
-        if isinstance(nested, bool) or not isinstance(nested, (int, float)):
-            continue
-        fields[str(key)] = float(nested)
-    return fields
-
-
-def _trial_metrics(trial: Any) -> dict[str, float]:
-    metrics = {"objective": float(trial.value)}
-    for key, value in getattr(trial, "user_attrs", {}).items():
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
-            metrics[str(key)] = float(value)
-            continue
-        for field, number in _numeric_fields(value).items():
-            metrics[_metric_key(f"{key}_{field}")] = number
-    return metrics
-
-
-def _metric_key(name: str) -> str:
-    """MLflow 3 usa el punto como separador de dataset y no grafica esas claves."""
-
-    return name.replace(".", "_").replace("/", "_")
-
-
 @contextmanager
 def track_study(stage: str) -> Iterator[None]:
     """Abre una corrida hija por study, donde se grafica la serie de trials."""
@@ -371,8 +333,7 @@ def optuna_callback(stage: str):
 
         if mlflow.active_run() is None or trial.value is None:
             return
-        for key, value in _trial_metrics(trial).items():
-            mlflow.log_metric(_metric_key(key), value, step=int(trial.number))
+        mlflow.log_metric("objective", float(trial.value), step=int(trial.number))
         mlflow.set_tag("optuna_study", study.study_name)
         mlflow.set_tag("stage", stage)
 

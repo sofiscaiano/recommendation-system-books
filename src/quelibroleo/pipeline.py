@@ -17,15 +17,10 @@ from .config import PipelineConfig
 from .data import ITEM_COL, USER_COL, load_dataset, observed_catalog
 from .features import FeatureBuilder, FeatureSet, attach_relevance
 from .metrics import (
-    catalog_coverage,
-    long_tail_exposure,
     ndcg_at_k,
     ndcg_per_user,
-    paired_bootstrap_delta,
-    recall_at_k,
     retrieval_metrics,
     rows_against_reference,
-    segment_metrics,
 )
 from .ranker import LambdaRanker
 from .retrieval import (
@@ -56,18 +51,15 @@ class FoldMaterial:
 
 @dataclass(frozen=True)
 class EvaluationReport:
-    """Métricas principales y diagnósticos serializables."""
+    """Métricas del hold-out que se comparan entre corridas."""
 
-    baseline_ndcg_at_20: float
+    submit_ndcg_at_20: float
+    submit_baseline_ndcg_at_20: float
+    submit_users: int
     model_ndcg_at_20: float
-    model_recall_at_20: float
+    baseline_ndcg_at_20: float
     retrieval_recall: float
-    retrieval_weighted_recall: float
     retrieval_oracle_ndcg_at_20: float
-    catalog_coverage_at_20: float
-    long_tail_exposure_at_20: float
-    paired_delta: dict[str, float]
-    segments: dict[str, dict[str, float]]
     candidate_budget: int
     evaluation_users: int
 
@@ -467,28 +459,17 @@ def _evaluate(
     baseline_per_user = ndcg_per_user(baseline, outer.test)
     model_per_user = ndcg_per_user(top20, outer.test)
     retrieval = retrieval_metrics(fused.candidates, outer.test)
-    eligible_items = set(observed_catalog(outer.train, bundle.books)[ITEM_COL])
+    submit_ids = _submit_user_ids(config)
+    submit_model, submit_users = _mean_for(model_per_user, submit_ids)
+    submit_baseline, _ = _mean_for(baseline_per_user, submit_ids)
     report = EvaluationReport(
-        baseline_ndcg_at_20=float(baseline_per_user.mean()),
+        submit_ndcg_at_20=submit_model,
+        submit_baseline_ndcg_at_20=submit_baseline,
+        submit_users=submit_users,
         model_ndcg_at_20=float(model_per_user.mean()),
-        model_recall_at_20=recall_at_k(top20, outer.test),
+        baseline_ndcg_at_20=float(baseline_per_user.mean()),
         retrieval_recall=retrieval.recall,
-        retrieval_weighted_recall=retrieval.weighted_recall,
         retrieval_oracle_ndcg_at_20=retrieval.oracle_ndcg,
-        catalog_coverage_at_20=catalog_coverage(top20, eligible_items),
-        long_tail_exposure_at_20=long_tail_exposure(top20, outer.train),
-        paired_delta=paired_bootstrap_delta(
-            model_per_user,
-            baseline_per_user,
-            random_state=config.random_seed,
-        ),
-        segments=segment_metrics(
-            top20,
-            fused.candidates,
-            outer.test,
-            outer.train,
-            eligible_items,
-        ),
         candidate_budget=trained.rrf_cutoff,
         evaluation_users=len(outer.evaluation_users),
     )
@@ -521,13 +502,22 @@ def _evaluate(
         _stamp_frame(pd.DataFrame(trained.ablation_metrics)).to_csv(
             artifacts / "feature_ablations.csv", index=False
         )
-        _stamp_frame(
-            pd.DataFrame(
-                [{"segment": name, **values} for name, values in report.segments.items()]
-            )
-        ).to_csv(artifacts / "evaluation_segments.csv", index=False)
         joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
     return report, trained
+
+
+def _submit_user_ids(config: PipelineConfig) -> set[str]:
+    """Lectores de la entrega. El NDCG de submit solo promedia a los que tienen test."""
+
+    example = pd.read_csv(config.example_path, dtype=str)
+    return set(example[USER_COL].astype(str))
+
+
+def _mean_for(values: pd.Series, users: set[str]) -> tuple[float, int]:
+    selected = values[values.index.astype(str).isin(users)]
+    if selected.empty:
+        return 0.0, 0
+    return float(selected.mean()), len(selected)
 
 
 def _stamp_frame(frame: pd.DataFrame) -> pd.DataFrame:

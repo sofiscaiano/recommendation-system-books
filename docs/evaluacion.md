@@ -16,32 +16,18 @@ Resultado oficial del sistema completo contra el baseline de popularidad.
 
 | Campo | Qué mide |
 | --- | --- |
-| `baseline_ndcg_at_20` | NDCG@20 del ranking global por cantidad de interacciones, excluyendo libros ya leídos. |
-| `model_ndcg_at_20` | NDCG@20 del top-20 final de LambdaRank. Es la métrica principal. |
-| `model_recall_at_20` | Proporción de los 20 libros de test que aparecen en el top-20 final. Un 0,136 equivale a unos 2,7 aciertos por usuario. |
-| `retrieval_recall` | Proporción de los 20 libros de test que sobreviven dentro de los candidatos, antes de rankear. Con M = 200, un 0,307 equivale a unos 6,1 aciertos disponibles por usuario. |
-| `retrieval_weighted_recall` | Igual que el recall, pero cada libro pesa según su rating. Mide si se recuperan los libros mejor calificados y no solo cualquier interacción futura. |
+| `submit_ndcg_at_20` | NDCG@20 del modelo en los lectores de `ejemplo.csv` que entran al hold-out. Es el número a mirar: Kaggle evalúa a esa población, no al promedio de todos. |
+| `submit_baseline_ndcg_at_20` | NDCG@20 de popularidad en esos mismos lectores. |
+| `submit_users` | Cuántos lectores de la entrega tienen más de 20 interacciones y por eso entran al promedio. El resto no tiene últimas 20 que reservar. |
+| `model_ndcg_at_20` | NDCG@20 del modelo sobre todos los lectores del hold-out. |
+| `baseline_ndcg_at_20` | NDCG@20 de popularidad sobre todos los lectores del hold-out. |
+| `retrieval_recall` | Proporción de los 20 libros de test que sobreviven dentro de los candidatos, antes de rankear. |
 | `retrieval_oracle_ndcg_at_20` | NDCG@20 máximo posible con esos candidatos: ordena primero los libros de test recuperados, del rating más alto al más bajo. Es el techo del ranker. |
-| `catalog_coverage_at_20` | Cantidad de libros distintos que aparecen en algún top-20, dividida por los libros elegibles del entrenamiento. |
-| `long_tail_exposure_at_20` | Proporción de posiciones del top-20 ocupadas por libros de cola larga. La cola incluye los libros cuyo conteo está en el 80 % inferior de popularidad. |
-| `paired_delta` | Diferencia de NDCG@20 entre el modelo y la popularidad para el mismo usuario. `mean` es el promedio; `lower` y `upper` son el intervalo bootstrap del 95 % con 2.000 remuestreos. |
-| `segments` | Métricas por grupo de usuarios. Cada grupo incluye NDCG@20, Recall@20 del ranking, recall de retrieval, cobertura y exposición long-tail. |
 | `candidate_budget` | Corte del ranking ya fusionado: cuántos candidatos entran al ranker. Cada fuente se lee más profundo que este corte. |
 | `evaluation_users` | Lectores incluidos en el holdout. |
 
-Los segmentos `activity_q1` a `activity_q4` dividen a los usuarios evaluados en
-cuatro grupos de igual tamaño según cuántas interacciones tienen en train. `q1`
-es el grupo con menos historial y `q4` el de mayor actividad.
-`single_date_history` reúne a quienes tienen todas sus interacciones de train
-en una sola fecha; para ellos el orden temporal no es informativo.
-
-La cobertura por segmento usa el mismo catálogo elegible que la métrica global:
-cuenta cuántos libros distintos aparecen en el top-20 de ese grupo. Como cada
-cuartil tiene el mismo número de usuarios, los valores son comparables entre sí.
-
-## `evaluation_segments.csv`
-
-Misma información que `segments` en `evaluation.json`, una fila por grupo.
+Esas mismas claves se publican en MLflow. Los hiperparámetros de cada trial de
+Optuna no se registran como métricas: la corrida hija solo grafica `objective`.
 
 ## `retrieval_folds.csv`
 

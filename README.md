@@ -107,9 +107,9 @@ El detalle de cada método, pesos y librerías está en
 2. **Ranking**: LightGBM LambdaRank ordena los candidatos con relevancia lineal
    0–10 y señales colaborativas, de contenido y secuenciales.
 
-Retrieval se controla con Recall@M, recall ponderado por rating y el techo
-oracle de NDCG@20. La evaluación final usa NDCG@20 macro, Recall@20, cobertura,
-exposición long-tail y bootstrap pareado contra popularidad.
+Retrieval se controla con el recall de candidatos y el techo oracle de
+NDCG@20. La evaluación final publica el NDCG@20 de los lectores de la entrega,
+el del hold-out completo y el de popularidad en esos mismos grupos.
 
 Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
 genera en `submission.csv`. Cada corrida también deja el log en
