@@ -10,7 +10,12 @@ from quelibroleo.config import PipelineConfig, RankerConfig
 from quelibroleo.data import ITEM_COL, USER_COL, observed_catalog
 from quelibroleo.features import FeatureBuilder, attach_relevance
 from quelibroleo.ranker import LambdaRanker
-from quelibroleo.retrieval import CandidateFusion, fit_retrievers, per_source_depth
+from quelibroleo.retrieval import (
+    CandidateFusion,
+    fit_retrievers,
+    per_source_depth,
+    retrievers_from_config,
+)
 from quelibroleo.serving import (
     ServingModel,
     _isbn,
@@ -20,7 +25,6 @@ from quelibroleo.serving import (
     recommend_user,
     unknown_book_ids,
 )
-from quelibroleo.serving import _retrievers_for as retrievers_for
 
 
 def _catalog(books: list[str]) -> pd.DataFrame:
@@ -107,7 +111,7 @@ def fitted() -> tuple[ServingModel, pd.DataFrame, list[str]]:
     catalog = _catalog(books)
     observed = observed_catalog(interactions, catalog)
     config = PipelineConfig()
-    retrievers = fit_retrievers(retrievers_for(config), interactions, observed)
+    retrievers = fit_retrievers(retrievers_from_config(config), interactions, observed)
     builder = FeatureBuilder().fit(interactions, observed)
     model = ServingModel(
         ranker=LambdaRanker(),

@@ -47,7 +47,7 @@ def test_popularity_and_item_cosine_exclude_seen_items() -> None:
     popular = popularity.recommend(["u1"], interactions, 3)
     assert set(popular["id_libro"]).isdisjoint({"b1", "b2"})
 
-    cosine = ItemCosineRetriever("occurrence").fit(interactions, catalog)
+    cosine = ItemCosineRetriever().fit(interactions, catalog)
     candidates = cosine.recommend(["u1"], interactions, 3)
     assert not candidates.empty
     assert set(candidates["id_libro"]).isdisjoint({"b1", "b2"})

@@ -15,7 +15,6 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from scipy import sparse
 
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
@@ -33,10 +32,9 @@ from .retrieval import (
     CANDIDATE_COLUMNS,
     CandidateFusion,
     ImplicitMFRetriever,
-    _recency_weights,
-    build_default_retrievers,
     fit_retrievers,
     per_source_depth,
+    retrievers_from_config,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -92,7 +90,7 @@ def export_serving_artifact(
         "Ajustando fuentes de serving sobre %s interacciones",
         len(interactions),
     )
-    retrievers = fit_retrievers(_retrievers_for(config), interactions, catalog)
+    retrievers = fit_retrievers(retrievers_from_config(config), interactions, catalog)
     builder = FeatureBuilder().fit(interactions, catalog)
     model = ServingModel(
         ranker=trained.ranker,
@@ -376,19 +374,6 @@ def recommend_user(
     return chosen
 
 
-def _retrievers_for(config: PipelineConfig) -> list[Any]:
-    """Las mismas fuentes que el entrenamiento, para exportar el artefacto."""
-
-    retrieval = config.retrieval
-    return build_default_retrievers(
-        random_state=config.random_seed,
-        implicit_factors=retrieval.implicit_factors,
-        implicit_iterations=retrieval.implicit_iterations,
-        half_life_days=retrieval.recency_half_life_days,
-        tfidf_max_features=retrieval.tfidf_max_features,
-    )
-
-
 def _empty_history() -> pd.DataFrame:
     """Historial vacío con las columnas y los tipos del resto del pipeline."""
 
@@ -425,58 +410,8 @@ def _recommend_source(
     """Candidatos de una fuente. ALS recalcula el factor de este lector."""
 
     if isinstance(retriever, ImplicitMFRetriever) and retriever.algorithm == "als":
-        return _als_fold_in(retriever, user_id, history, n)
+        return retriever.recommend_fold_in(user_id, history, n)
     return retriever.recommend([user_id], history, n)
-
-
-def _als_fold_in(
-    retriever: ImplicitMFRetriever,
-    user_id: str,
-    history: pd.DataFrame,
-    n: int,
-) -> pd.DataFrame:
-    """Recalcula el factor de este lector sin escribir el modelo global."""
-
-    if retriever.model_ is None or retriever.item_ids_ is None:
-        raise RuntimeError("El retriever debe entrenarse antes de recomendar")
-    item_index = {str(item): index for index, item in enumerate(retriever.item_ids_)}
-    if history.empty:
-        return pd.DataFrame(columns=CANDIDATE_COLUMNS)
-    usable = history[
-        (history[USER_COL].astype(str) == user_id)
-        & history[ITEM_COL].astype(str).isin(item_index)
-    ].copy()
-    if usable.empty:
-        return pd.DataFrame(columns=CANDIDATE_COLUMNS)
-
-    confidence = (
-        1.0 + usable[RATING_COL].to_numpy(dtype=np.float32) / 10.0
-    ) * _recency_weights(usable, retriever.half_life_days)
-    indices = usable[ITEM_COL].astype(str).map(item_index).to_numpy(dtype=int)
-    row = sparse.csr_matrix(
-        (
-            confidence.astype(np.float32),
-            (np.zeros(len(indices), dtype=int), indices),
-        ),
-        shape=(1, len(retriever.item_ids_)),
-        dtype=np.float32,
-    )
-    item_indices, scores = retriever.model_.recommend(
-        0,
-        row,
-        N=n,
-        filter_already_liked_items=True,
-        recalculate_user=True,
-    )
-    return pd.DataFrame(
-        {
-            USER_COL: user_id,
-            ITEM_COL: [str(retriever.item_ids_[index]) for index in item_indices],
-            "source": retriever.source_name,
-            "score": [float(score) for score in scores],
-            "rank": list(range(1, len(item_indices) + 1)),
-        }
-    )
 
 
 def _builder_for_request(

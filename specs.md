@@ -89,7 +89,7 @@ LightGBM LambdaRank ordena los candidatos. Cada lector es un grupo. La etiqueta 
 
 Cambiar `label_gain` exige un `evaluate --tune` nuevo: el archivo guardado se eligió con la ganancia anterior. `lambdarank_truncation_level` y `eval_at` quedan en 20. El desempate del score es estable por `id_libro`.
 
-Las features son numéricas: scores y rangos de cada fuente, estadísticas de lector e ítem, afinidad de autor y género, y señales de secuencia. Autor, género y editorial no entran como categóricas de alta cardinalidad.
+Las features son numéricas: scores y rangos de cada fuente, estadísticas de lector e ítem, afinidad de autor y género, y señales de secuencia. Autor y género no entran como categóricas de alta cardinalidad; la editorial queda en el texto de TF-IDF.
 
 ## Hiperparámetros
 

@@ -12,6 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
 from .baselines import PopularityRecommender
+from .config import PipelineConfig
 from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 CANDIDATE_COLUMNS = [USER_COL, ITEM_COL, "source", "score", "rank"]
@@ -49,6 +50,14 @@ def _recency_weights(
     max_dates = frame.groupby(USER_COL)[DATE_COL].transform("max")
     age_days = (max_dates - frame[DATE_COL]).dt.days.clip(lower=0).to_numpy()
     return np.exp2(-age_days / half_life_days).astype(np.float32)
+
+
+def _implicit_confidence(frame: pd.DataFrame, half_life_days: float) -> np.ndarray:
+    """Confianza de ALS y BPR: `(1 + rating / 10)` por recencia."""
+
+    return (
+        1.0 + frame[RATING_COL].to_numpy(dtype=np.float32) / 10.0
+    ) * _recency_weights(frame, half_life_days)
 
 
 def _rank_scores(
@@ -92,18 +101,8 @@ def _rank_scores(
 class ItemCosineRetriever:
     """Item-item sin materializar la matriz cuadrada de similitud."""
 
-    def __init__(
-        self,
-        mode: str = "occurrence",
-        *,
-        half_life_days: float = 365.0,
-    ) -> None:
-        if mode not in {"occurrence", "adjusted"}:
-            raise ValueError("mode debe ser 'occurrence' o 'adjusted'")
-        self.mode = mode
-        self.source_name = (
-            "item_cosine" if mode == "occurrence" else "item_adjusted_cosine"
-        )
+    def __init__(self, *, half_life_days: float = 365.0) -> None:
+        self.source_name = "item_cosine"
         self.half_life_days = half_life_days
         self.item_ids_: np.ndarray | None = None
         self.item_index_: dict[str, int] = {}
@@ -125,18 +124,11 @@ class ItemCosineRetriever:
         }
         user_index = {user: index for index, user in enumerate(user_ids)}
 
-        if self.mode == "occurrence":
-            values = (
-                fit_data[RATING_COL].to_numpy(dtype=np.float32)
-                / 10.0
-                * _recency_weights(fit_data, self.half_life_days)
-            )
-        else:
-            user_means = fit_data.groupby(USER_COL)[RATING_COL].transform("mean")
-            values = (
-                fit_data[RATING_COL].to_numpy(dtype=np.float32)
-                - user_means.to_numpy(dtype=np.float32)
-            )
+        values = (
+            fit_data[RATING_COL].to_numpy(dtype=np.float32)
+            / 10.0
+            * _recency_weights(fit_data, self.half_life_days)
+        )
 
         rows = fit_data[ITEM_COL].map(self.item_index_).to_numpy()
         cols = fit_data[USER_COL].map(user_index).to_numpy()
@@ -168,14 +160,7 @@ class ItemCosineRetriever:
         ].copy()
         if usable.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
-        if self.mode == "occurrence":
-            query_weights = usable[RATING_COL].to_numpy(dtype=np.float32) / 10.0
-        else:
-            means = usable.groupby(USER_COL)[RATING_COL].transform("mean")
-            query_weights = (
-                usable[RATING_COL].to_numpy(dtype=np.float32)
-                - means.to_numpy(dtype=np.float32)
-            )
+        query_weights = usable[RATING_COL].to_numpy(dtype=np.float32) / 10.0
         query = sparse.csr_matrix(
             (
                 query_weights,
@@ -254,10 +239,7 @@ class ImplicitMFRetriever:
         self.item_ids_ = np.array(sorted(eligible), dtype=object)
         self.user_index_ = {user: index for index, user in enumerate(user_ids)}
         item_index = {item: index for index, item in enumerate(self.item_ids_)}
-        confidence = (
-            1.0
-            + fit_data[RATING_COL].to_numpy(dtype=np.float32) / 10.0
-        ) * _recency_weights(fit_data, self.half_life_days)
+        confidence = _implicit_confidence(fit_data, self.half_life_days)
         user_item = sparse.csr_matrix(
             (
                 confidence,
@@ -321,6 +303,55 @@ class ImplicitMFRetriever:
                 )
             )
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
+
+    def recommend_fold_in(
+        self,
+        user_id: str,
+        history: pd.DataFrame,
+        n: int,
+    ) -> pd.DataFrame:
+        """Recalcula el factor de un lector que no está en la matriz de entrenamiento."""
+
+        if self.algorithm != "als":
+            raise RuntimeError("El fold-in en caliente solo está definido para ALS")
+        if self.model_ is None or self.item_ids_ is None:
+            raise RuntimeError("El retriever debe entrenarse antes de recomendar")
+        item_index = {str(item): index for index, item in enumerate(self.item_ids_)}
+        if history.empty:
+            return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+        usable = history[
+            (history[USER_COL].astype(str) == user_id)
+            & history[ITEM_COL].astype(str).isin(item_index)
+        ].copy()
+        if usable.empty:
+            return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+
+        confidence = _implicit_confidence(usable, self.half_life_days)
+        indices = usable[ITEM_COL].astype(str).map(item_index).to_numpy(dtype=int)
+        row = sparse.csr_matrix(
+            (
+                confidence.astype(np.float32),
+                (np.zeros(len(indices), dtype=int), indices),
+            ),
+            shape=(1, len(self.item_ids_)),
+            dtype=np.float32,
+        )
+        item_indices, scores = self.model_.recommend(
+            0,
+            row,
+            N=n,
+            filter_already_liked_items=True,
+            recalculate_user=True,
+        )
+        return pd.DataFrame(
+            {
+                USER_COL: user_id,
+                ITEM_COL: [str(self.item_ids_[index]) for index in item_indices],
+                "source": self.source_name,
+                "score": [float(score) for score in scores],
+                "rank": list(range(1, len(item_indices) + 1)),
+            }
+        )
 
 
 class TfidfRetriever:
@@ -453,7 +484,7 @@ def build_default_retrievers(
 
     return [
         PopularityRecommender(),
-        ItemCosineRetriever("occurrence", half_life_days=half_life_days),
+        ItemCosineRetriever(half_life_days=half_life_days),
         ImplicitMFRetriever(
             "als",
             factors=implicit_factors,
@@ -473,6 +504,19 @@ def build_default_retrievers(
             half_life_days=half_life_days,
         ),
     ]
+
+
+def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
+    """Instancia las fuentes activas con los hiperparámetros fijos del pipeline."""
+
+    retrieval = config.retrieval
+    return build_default_retrievers(
+        random_state=config.random_seed,
+        implicit_factors=retrieval.implicit_factors,
+        implicit_iterations=retrieval.implicit_iterations,
+        half_life_days=retrieval.recency_half_life_days,
+        tfidf_max_features=retrieval.tfidf_max_features,
+    )
 
 
 def fit_retrievers(

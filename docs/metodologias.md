@@ -26,8 +26,7 @@ Librerías: pandas.
 
 ### Item-item por coseno
 
-`ItemCosineRetriever` (`src/quelibroleo/retrieval.py`), en modo
-`occurrence` (`item_cosine`).
+`ItemCosineRetriever` (`src/quelibroleo/retrieval.py`), fuente `item_cosine`.
 
 Construye una matriz dispersa ítem × usuario y normaliza cada fila a norma L2.
 El score de un candidato es el producto interno entre el perfil del lector y el
@@ -39,9 +38,9 @@ La recencia es una semivida exponencial: si `half_life_days` es 365, una
 lectura de un año antes del último evento del lector pesa la mitad
 (`2^(-edad_en_días / semivida)`).
 
-El modo `adjusted` (rating centrado en la media del lector, sin recencia) sigue
-en la clase, pero no entra al pipeline: en la ablación del último fold, quitarlo
-dejaba el recall y el oracle del conjunto candidato en el mismo valor.
+Un modo `adjusted` (rating centrado en la media del lector, sin recencia) se
+probó y quedó afuera: en la ablación del último fold, quitarlo dejaba el recall
+y el oracle del conjunto candidato en el mismo valor.
 
 Librerías: NumPy, SciPy (`scipy.sparse.csr_matrix`), scikit-learn
 (`sklearn.preprocessing.normalize`), pandas.
@@ -179,6 +178,6 @@ anterior al corte:
 | Secuencia | Coincidencia con el último autor y género; proporción de ese autor o género en las últimas 10 lecturas; probabilidad empírica de pasar del autor/género anterior al del candidato; edad de publicación respecto del corte del lector. |
 
 No se codifican texto libre ni identificadores categóricos de alta cardinalidad
-dentro del booster: autor, género y editorial entran solo a través de estos
-agregados numéricos. Valores infinitos se pasan a NaN; LightGBM los trata como
-faltantes.
+dentro del booster: autor y género entran solo a través de estos agregados
+numéricos. La editorial queda en el texto de TF-IDF. Valores infinitos se
+pasan a NaN; LightGBM los trata como faltantes.

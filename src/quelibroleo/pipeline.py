@@ -33,10 +33,10 @@ from .ranker import LambdaRanker
 from .retrieval import (
     CandidateFusion,
     FusionResult,
-    build_default_retrievers,
     fit_retrievers,
     per_source_depth,
     retrieve_all,
+    retrievers_from_config,
 )
 from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
 
@@ -83,19 +83,6 @@ class TrainedPipeline:
     hyperparameters_run_name: str = ""
 
 
-def _make_retrievers(config: PipelineConfig) -> list[Any]:
-    """Fuentes activas con los hiperparámetros fijos de la config."""
-
-    retrieval = config.retrieval
-    return build_default_retrievers(
-        random_state=config.random_seed,
-        implicit_factors=retrieval.implicit_factors,
-        implicit_iterations=retrieval.implicit_iterations,
-        half_life_days=retrieval.recency_half_life_days,
-        tfidf_max_features=retrieval.tfidf_max_features,
-    )
-
-
 def _collect_material(
     train: pd.DataFrame,
     target: pd.DataFrame,
@@ -113,7 +100,7 @@ def _collect_material(
         len(users),
     )
     catalog = observed_catalog(train, books)
-    retrievers = fit_retrievers(_make_retrievers(config), train, catalog)
+    retrievers = fit_retrievers(retrievers_from_config(config), train, catalog)
     source_candidates = retrieve_all(
         retrievers,
         users,
@@ -134,7 +121,7 @@ def _collect_material(
 def _active_source_names(config: PipelineConfig) -> tuple[str, ...]:
     """Nombres de las fuentes que esta corrida entrena."""
 
-    return tuple(retriever.source_name for retriever in _make_retrievers(config))
+    return tuple(retriever.source_name for retriever in retrievers_from_config(config))
 
 
 def _weights_for_active_sources(
@@ -241,7 +228,7 @@ def train_ranker_from_history(
     per_source = per_source_depth(
         depth_cutoff,
         rrf_k=config.retrieval.rrf_k,
-        n_sources=len(_make_retrievers(config)),
+        n_sources=len(retrievers_from_config(config)),
     )
     materials = [
         _collect_material(
@@ -395,7 +382,7 @@ def _score_history(
         per_source=per_source_depth(
             trained.rrf_cutoff,
             rrf_k=config.retrieval.rrf_k,
-            n_sources=len(_make_retrievers(config)),
+            n_sources=len(retrievers_from_config(config)),
         ),
     )
     fusion = CandidateFusion(

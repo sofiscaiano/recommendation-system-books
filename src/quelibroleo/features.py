@@ -54,12 +54,11 @@ class FeatureBuilder:
             ITEM_COL,
             "autor",
             "genero",
-            "editorial",
             "anio_edicion_num",
         ]
         available = [column for column in metadata_columns if column in catalog]
         metadata = catalog[available].drop_duplicates(ITEM_COL).copy()
-        for column in ("autor", "genero", "editorial"):
+        for column in ("autor", "genero"):
             if column not in metadata:
                 metadata[column] = ""
             metadata[column] = metadata[column].fillna("").astype(str)
@@ -72,27 +71,15 @@ class FeatureBuilder:
             [USER_COL, DATE_COL, ITEM_COL], kind="mergesort"
         )
         enriched = ordered.merge(metadata, on=ITEM_COL, how="left")
-        enriched[["autor", "genero", "editorial"]] = enriched[
-            ["autor", "genero", "editorial"]
-        ].fillna("")
+        enriched[["autor", "genero"]] = enriched[["autor", "genero"]].fillna("")
 
-        user_stats = (
-            enriched.groupby(USER_COL)
-            .agg(
-                user_count=(ITEM_COL, "size"),
-                user_mean_rating=(RATING_COL, "mean"),
-                user_std_rating=(RATING_COL, "std"),
-                user_first_date=(DATE_COL, "min"),
-                user_last_date=(DATE_COL, "max"),
-                user_distinct_authors=("autor", "nunique"),
-                user_distinct_genres=("genero", "nunique"),
-            )
-            .reset_index()
-        )
-        user_stats["user_active_days"] = (
-            user_stats["user_last_date"] - user_stats["user_first_date"]
-        ).dt.days
-        self.user_stats_ = user_stats.drop(columns="user_first_date")
+        activity = self._user_activity_tables(enriched)
+        self.user_stats_ = activity["user_stats"]
+        self.user_author_ = activity["user_author"]
+        self.user_genre_ = activity["user_genre"]
+        self.user_last_ = activity["user_last"]
+        self.user_recent_author_ = activity["user_recent_author"]
+        self.user_recent_genre_ = activity["user_recent_genre"]
 
         item_stats = (
             enriched.groupby(ITEM_COL)
@@ -109,48 +96,6 @@ class FeatureBuilder:
             + self.smoothing * self.global_mean_
         ) / (item_stats["item_count"] + self.smoothing)
         self.item_stats_ = item_stats
-
-        self.user_author_ = (
-            enriched.groupby([USER_COL, "autor"])
-            .agg(
-                user_author_count=(ITEM_COL, "size"),
-                user_author_mean=(RATING_COL, "mean"),
-            )
-            .reset_index()
-        )
-        self.user_genre_ = (
-            enriched.groupby([USER_COL, "genero"])
-            .agg(
-                user_genre_count=(ITEM_COL, "size"),
-                user_genre_mean=(RATING_COL, "mean"),
-            )
-            .reset_index()
-        )
-
-        last = enriched.groupby(USER_COL, sort=False).tail(1)
-        self.user_last_ = last[
-            [USER_COL, DATE_COL, "autor", "genero"]
-        ].rename(
-            columns={
-                DATE_COL: "user_cutoff_date",
-                "autor": "last_author",
-                "genero": "last_genre",
-            }
-        )
-
-        recent = enriched.groupby(USER_COL, sort=False).tail(self.recent_n)
-        self.user_recent_author_ = (
-            recent.groupby([USER_COL, "autor"])
-            .size()
-            .rename("recent_author_count")
-            .reset_index()
-        )
-        self.user_recent_genre_ = (
-            recent.groupby([USER_COL, "genero"])
-            .size()
-            .rename("recent_genre_count")
-            .reset_index()
-        )
 
         transition_data = enriched[
             [USER_COL, "autor", "genero"]
@@ -194,6 +139,70 @@ class FeatureBuilder:
         result[output] = result["_pair"] / result["_total"]
         return result[[previous, current, output]]
 
+    def _user_activity_tables(self, enriched: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        """Estadísticas, afinidades y últimos ítems de cada lector."""
+
+        user_stats = (
+            enriched.groupby(USER_COL)
+            .agg(
+                user_count=(ITEM_COL, "size"),
+                user_mean_rating=(RATING_COL, "mean"),
+                user_std_rating=(RATING_COL, "std"),
+                user_first_date=(DATE_COL, "min"),
+                user_last_date=(DATE_COL, "max"),
+                user_distinct_authors=("autor", "nunique"),
+                user_distinct_genres=("genero", "nunique"),
+            )
+            .reset_index()
+        )
+        user_stats["user_active_days"] = (
+            user_stats["user_last_date"] - user_stats["user_first_date"]
+        ).dt.days
+        user_stats = user_stats.drop(columns="user_first_date")
+        user_author = (
+            enriched.groupby([USER_COL, "autor"])
+            .agg(
+                user_author_count=(ITEM_COL, "size"),
+                user_author_mean=(RATING_COL, "mean"),
+            )
+            .reset_index()
+        )
+        user_genre = (
+            enriched.groupby([USER_COL, "genero"])
+            .agg(
+                user_genre_count=(ITEM_COL, "size"),
+                user_genre_mean=(RATING_COL, "mean"),
+            )
+            .reset_index()
+        )
+        last = enriched.groupby(USER_COL, sort=False).tail(1)
+        user_last = last[[USER_COL, DATE_COL, "autor", "genero"]].rename(
+            columns={
+                DATE_COL: "user_cutoff_date",
+                "autor": "last_author",
+                "genero": "last_genre",
+            }
+        )
+        recent = enriched.groupby(USER_COL, sort=False).tail(self.recent_n)
+        return {
+            "user_stats": user_stats,
+            "user_author": user_author,
+            "user_genre": user_genre,
+            "user_last": user_last,
+            "user_recent_author": (
+                recent.groupby([USER_COL, "autor"])
+                .size()
+                .rename("recent_author_count")
+                .reset_index()
+            ),
+            "user_recent_genre": (
+                recent.groupby([USER_COL, "genero"])
+                .size()
+                .rename("recent_genre_count")
+                .reset_index()
+            ),
+        }
+
     def user_frames_for(self, history: pd.DataFrame) -> dict[str, pd.DataFrame]:
         """Tablas de usuario para un historial, sin modificar las de ``fit``."""
 
@@ -225,74 +234,9 @@ class FeatureBuilder:
         metadata = self.catalog_
         ordered = history.sort_values([USER_COL, DATE_COL, ITEM_COL], kind="mergesort")
         enriched = ordered.merge(metadata, on=ITEM_COL, how="left")
-        enriched[["autor", "genero", "editorial"]] = enriched[
-            ["autor", "genero", "editorial"]
-        ].fillna("")
+        enriched[["autor", "genero"]] = enriched[["autor", "genero"]].fillna("")
         enriched[RATING_COL] = pd.to_numeric(enriched[RATING_COL])
-
-        user_stats = (
-            enriched.groupby(USER_COL)
-            .agg(
-                user_count=(ITEM_COL, "size"),
-                user_mean_rating=(RATING_COL, "mean"),
-                user_std_rating=(RATING_COL, "std"),
-                user_first_date=(DATE_COL, "min"),
-                user_last_date=(DATE_COL, "max"),
-                user_distinct_authors=("autor", "nunique"),
-                user_distinct_genres=("genero", "nunique"),
-            )
-            .reset_index()
-        )
-        user_stats["user_active_days"] = (
-            user_stats["user_last_date"] - user_stats["user_first_date"]
-        ).dt.days
-        user_stats = user_stats.drop(columns="user_first_date")
-
-        user_author = (
-            enriched.groupby([USER_COL, "autor"])
-            .agg(
-                user_author_count=(ITEM_COL, "size"),
-                user_author_mean=(RATING_COL, "mean"),
-            )
-            .reset_index()
-        )
-        user_genre = (
-            enriched.groupby([USER_COL, "genero"])
-            .agg(
-                user_genre_count=(ITEM_COL, "size"),
-                user_genre_mean=(RATING_COL, "mean"),
-            )
-            .reset_index()
-        )
-        last = enriched.groupby(USER_COL, sort=False).tail(1)
-        user_last = last[[USER_COL, DATE_COL, "autor", "genero"]].rename(
-            columns={
-                DATE_COL: "user_cutoff_date",
-                "autor": "last_author",
-                "genero": "last_genre",
-            }
-        )
-        recent = enriched.groupby(USER_COL, sort=False).tail(self.recent_n)
-        user_recent_author = (
-            recent.groupby([USER_COL, "autor"])
-            .size()
-            .rename("recent_author_count")
-            .reset_index()
-        )
-        user_recent_genre = (
-            recent.groupby([USER_COL, "genero"])
-            .size()
-            .rename("recent_genre_count")
-            .reset_index()
-        )
-        return {
-            "user_stats": user_stats,
-            "user_author": user_author,
-            "user_genre": user_genre,
-            "user_last": user_last,
-            "user_recent_author": user_recent_author,
-            "user_recent_genre": user_recent_genre,
-        }
+        return self._user_activity_tables(enriched)
 
     def transform(
         self,
@@ -394,7 +338,6 @@ class FeatureBuilder:
             ITEM_COL,
             "autor",
             "genero",
-            "editorial",
             "last_author",
             "last_genre",
             "previous_author",
