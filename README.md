@@ -51,10 +51,12 @@ uv run python main.py evaluate --model popularity --note "baseline"
 ```
 
 Un modelo nuevo implementa `fit(split)` y `recommend(users)` y se registra
-en `build_model` (`src/quelibroleo/models.py`). `split.history` es el
+en `build_model` (`src/quelibroleo/models.py`). Puede ser un solo modelo:
+no tiene que buscar candidatos y después ordenarlos. `split.history` es el
 train, `split.test` el hold-out y `validation_folds` los cortes internos;
-el último fold es la validación. Las columnas que ordena LambdaRank están
-en `ranker_columns.py`: no eligen libros, los describen.
+el último fold es la validación. `two_stage`, el modelo actual, sí separa
+esas etapas. La tabla numérica con la que su LambdaRank ordena está en
+`two_stage/columns.py` y no la usa un modelo único.
 
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
 costosa:

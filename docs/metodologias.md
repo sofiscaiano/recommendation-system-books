@@ -26,7 +26,7 @@ Librerías: pandas.
 
 ### Item-item por coseno
 
-`ItemCosineRetriever` (`src/quelibroleo/retrieval.py`), fuente `item_cosine`.
+`ItemCosineRetriever` (`src/quelibroleo/two_stage/retrieval.py`), fuente `item_cosine`.
 
 Construye una matriz dispersa ítem × usuario y normaliza cada fila a norma L2.
 El score de un candidato es el producto interno entre el perfil del lector y el
@@ -128,7 +128,7 @@ Librerías: NumPy y pandas. No hay una librería externa de RRF.
 
 ### LambdaRank (LightGBM)
 
-`LambdaRanker` (`src/quelibroleo/ranker.py`) envuelve `lightgbm.LGBMRanker`.
+`LambdaRanker` (`src/quelibroleo/two_stage/ranker.py`) envuelve `lightgbm.LGBMRanker`.
 
 LambdaRank entrena árboles de boosting para optimizar NDCG, no el error de
 rating. Cada lector es un grupo (`query_id`). Dentro del grupo, la etiqueta
@@ -164,9 +164,9 @@ con los pesos ya normalizados. Sin `--tune`, el entrenamiento de la evaluación
 y de la entrega usa ese archivo. Un archivo de una búsqueda anterior, con
 cuotas, no se reutiliza.
 
-### Columnas del ranker
+### Columnas de two_stage
 
-`ColumnBuilder` (`src/quelibroleo/ranker_columns.py`) arma, con el historial
+`ColumnBuilder` (`src/quelibroleo/two_stage/columns.py`) arma, con el historial
 anterior al corte:
 
 | Grupo | Qué aporta |

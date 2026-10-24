@@ -21,9 +21,12 @@ from .metrics import (
     retrieval_metrics,
     rows_against_reference,
 )
-from .ranker import LambdaRanker
-from .ranker_columns import ColumnBuilder, RankerTable, attach_relevance
-from .retrieval import (
+from .split_data import SplitData, load_split, seen_books, validation_folds
+from .submission import fill_submission
+from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
+from .two_stage.columns import ColumnBuilder, RankerTable, attach_relevance
+from .two_stage.ranker import LambdaRanker
+from .two_stage.retrieval import (
     CandidateFusion,
     FusionResult,
     fit_retrievers,
@@ -31,9 +34,6 @@ from .retrieval import (
     retrieve_all,
     retrievers_from_config,
 )
-from .split_data import SplitData, load_split, seen_books, validation_folds
-from .submission import fill_submission
-from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
 
 LOGGER = logging.getLogger(__name__)
 

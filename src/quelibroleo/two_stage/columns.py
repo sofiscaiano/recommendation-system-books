@@ -1,9 +1,9 @@
-"""Columnas numéricas de cada candidato, las que LambdaRank usa para ordenar.
+"""Tabla numérica que el LambdaRank de ``two_stage`` usa para ordenar candidatos.
 
-Retrieval ya eligió los libros. Este módulo no elige: describe cada candidato
-con scores de las fuentes, estadísticas de lector e ítem, afinidad de autor y
-género, y señales de la secuencia de lectura. Todo se calcula con el historial
-anterior al corte.
+Retrieval ya eligió los libros. Acá cada candidato se describe con scores de
+las fuentes, estadísticas de lector e ítem, afinidad de autor y género, y
+señales de la secuencia de lectura. Un modelo único, sin etapa de retrieval,
+no usa este archivo.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
+from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 
 def _safe_source(value: str) -> str:

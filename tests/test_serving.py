@@ -8,14 +8,6 @@ import pytest
 
 from quelibroleo.config import PipelineConfig, RankerConfig
 from quelibroleo.data import ITEM_COL, USER_COL, observed_catalog
-from quelibroleo.ranker import LambdaRanker
-from quelibroleo.ranker_columns import ColumnBuilder, attach_relevance
-from quelibroleo.retrieval import (
-    CandidateFusion,
-    fit_retrievers,
-    per_source_depth,
-    retrievers_from_config,
-)
 from quelibroleo.serving import (
     ServingModel,
     _isbn,
@@ -24,6 +16,14 @@ from quelibroleo.serving import (
     export_serving_artifact,
     recommend_user,
     unknown_book_ids,
+)
+from quelibroleo.two_stage.columns import ColumnBuilder, attach_relevance
+from quelibroleo.two_stage.ranker import LambdaRanker
+from quelibroleo.two_stage.retrieval import (
+    CandidateFusion,
+    fit_retrievers,
+    per_source_depth,
+    retrievers_from_config,
 )
 
 

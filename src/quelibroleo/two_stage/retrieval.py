@@ -11,9 +11,9 @@ from scipy import sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
-from .baselines import PopularityRecommender
-from .config import PipelineConfig
-from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
+from ..baselines import PopularityRecommender
+from ..config import PipelineConfig
+from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 CANDIDATE_COLUMNS = [USER_COL, ITEM_COL, "source", "score", "rank"]
 

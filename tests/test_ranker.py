@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 from quelibroleo.config import RankerConfig
-from quelibroleo.ranker import LambdaRanker
-from quelibroleo.ranker_columns import ColumnBuilder, attach_relevance
+from quelibroleo.two_stage.columns import ColumnBuilder, attach_relevance
+from quelibroleo.two_stage.ranker import LambdaRanker
 
 
 def test_label_gain_is_configurable_and_reaches_lightgbm() -> None:

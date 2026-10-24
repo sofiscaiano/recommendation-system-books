@@ -15,7 +15,14 @@ MODEL_NAMES = ("two_stage", "popularity")
 
 
 class Recommender(Protocol):
-    """``fit`` entrena con el train del corte. ``recommend`` devuelve ``rank`` desde 1."""
+    """Cualquier algoritmo, de una etapa o de dos. El corte no lo arma el modelo.
+
+    ``fit`` entrena con ``split.history``. Si hace falta validación, usa
+    ``validation_folds``: el último fold es la validación. ``recommend``
+    devuelve ``id_lector``, ``id_libro`` y ``rank`` desde 1, sin libros ya
+    leídos. ``two_stage`` busca candidatos y después los ordena; un modelo
+    único implementa estos dos métodos y no importa ``two_stage``.
+    """
 
     name: str
 
@@ -48,7 +55,10 @@ class PopularityModel:
 
 
 def build_model(name: str, config: PipelineConfig) -> Recommender:
-    """Instancia el modelo pedido. Uno nuevo se agrega acá y en ``MODEL_NAMES``."""
+    """Instancia el modelo pedido. Uno nuevo se agrega acá y en ``MODEL_NAMES``.
+
+    No tiene que separar retrieval y ranking. Alcanza con ``fit`` y ``recommend``.
+    """
 
     if name == "two_stage":
         from .pipeline import TwoStage

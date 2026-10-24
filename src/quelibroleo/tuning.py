@@ -12,7 +12,7 @@ import numpy as np
 
 from .config import LABEL_GAIN_MODES, PipelineConfig, search_ranges
 from .metrics import ndcg_at_k
-from .retrieval import CandidateFusion
+from .two_stage.retrieval import CandidateFusion
 
 LOGGER = logging.getLogger(__name__)
 TUNED_HYPERPARAMETERS_FILE = "tuned_hyperparameters.json"
@@ -199,7 +199,7 @@ def tune_pipeline(
         raise ValueError("Se requieren al menos dos folds para el study")
 
     from .pipeline import _concat_feature_sets, _material_to_features
-    from .ranker import LambdaRanker
+    from .two_stage.ranker import LambdaRanker
 
     retrieval = config.retrieval
     sources = sorted(materials[-1].source_candidates["source"].unique())

@@ -8,9 +8,9 @@ from typing import Any
 import lightgbm as lgb
 import pandas as pd
 
-from .config import LABEL_GAIN_MODES, RankerConfig
-from .data import ITEM_COL, USER_COL
-from .ranker_columns import RankerTable
+from ..config import LABEL_GAIN_MODES, RankerConfig
+from ..data import ITEM_COL, USER_COL
+from .columns import RankerTable
 
 LABEL_GAINS: dict[str, tuple[int, ...]] = {
     "linear": tuple(range(11)),

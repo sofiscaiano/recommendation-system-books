@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from quelibroleo.baselines import PopularityRecommender
-from quelibroleo.retrieval import (
+from quelibroleo.two_stage.retrieval import (
     CandidateFusion,
     ItemCosineRetriever,
     build_default_retrievers,

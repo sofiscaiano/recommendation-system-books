@@ -26,9 +26,9 @@ from .data import (
     load_dataset,
     observed_catalog,
 )
-from .ranker import LambdaRanker
-from .ranker_columns import ColumnBuilder
-from .retrieval import (
+from .two_stage.columns import ColumnBuilder
+from .two_stage.ranker import LambdaRanker
+from .two_stage.retrieval import (
     CANDIDATE_COLUMNS,
     CandidateFusion,
     ImplicitMFRetriever,
