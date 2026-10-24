@@ -60,6 +60,8 @@ ModelOption = Annotated[
 
 
 def _configure_logging(artifacts: Path) -> None:
+    """Log a consola y a ``artifacts/run.log``."""
+
     artifacts.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -82,6 +84,8 @@ def _config(
     label_gain: str,
     model: str,
 ) -> PipelineConfig:
+    """Arma la config de la corrida con las rutas, la nota y el modelo."""
+
     base = PipelineConfig()
     return replace(
         base,
@@ -109,6 +113,8 @@ def _run(
     label_gain: str,
     model: str,
 ) -> None:
+    """Ejecuta evaluate, submit o ambos con la misma configuración."""
+
     if not note.strip():
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)

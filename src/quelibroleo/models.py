@@ -19,9 +19,13 @@ class Recommender(Protocol):
 
     name: str
 
-    def fit(self, experiment: Experiment, *, tune: bool = False) -> None: ...
+    def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+        """Entrena solo con ``experiment.history``. ``tune`` es opcional."""
+        ...
 
-    def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame: ...
+    def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        """Ranking con columna ``rank`` desde 1. No incluye libros ya leídos."""
+        ...
 
 
 class PopularityModel:
@@ -30,12 +34,16 @@ class PopularityModel:
     name = "popularity"
 
     def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+        """Cuenta interacciones del train. Ignora ``tune``: no tiene hiperparámetros."""
+
         del tune
         catalog = set(observed_catalog(experiment.history, experiment.books)[ITEM_COL])
         self._model = PopularityRecommender().fit(experiment.history, catalog)
         self._history = experiment.history
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        """Top-20 global, saltando lo que cada lector ya leyó."""
+
         return self._model.recommend(users, self._history, n=20)
 
 

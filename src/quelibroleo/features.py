@@ -12,6 +12,8 @@ from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 
 def _safe_source(value: str) -> str:
+    """Deja el nombre de una fuente usable como sufijo de columna."""
+
     return re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_").lower()
 
 
@@ -46,6 +48,8 @@ class FeatureBuilder:
         train: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> FeatureBuilder:
+        """Estima estadísticas de lector, ítem, autor, género y transiciones."""
+
         metadata_columns = [
             ITEM_COL,
             "autor",
@@ -179,6 +183,8 @@ class FeatureBuilder:
         current: str,
         output: str,
     ) -> pd.DataFrame:
+        """Probabilidad de pasar de un autor o género al siguiente."""
+
         valid = frame[frame[previous].notna()]
         counts = valid.groupby([previous, current]).size().rename("_pair")
         totals = valid.groupby(previous).size().rename("_total")
@@ -293,6 +299,8 @@ class FeatureBuilder:
         fused_candidates: pd.DataFrame,
         source_candidates: pd.DataFrame,
     ) -> FeatureSet:
+        """Arma las columnas numéricas de cada candidato ya fusionado."""
+
         if any(
             value is None
             for value in (

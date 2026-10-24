@@ -31,6 +31,8 @@ class RollingFold:
 
 
 def _ordered(interactions: pd.DataFrame) -> pd.DataFrame:
+    """Ordena por lector, fecha e id_libro y numera la posición dentro del lector."""
+
     required = {USER_COL, ITEM_COL, DATE_COL}
     missing = required - set(interactions.columns)
     if missing:

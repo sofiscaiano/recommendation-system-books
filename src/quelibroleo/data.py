@@ -49,6 +49,8 @@ class DatasetBundle:
 
 
 def _read_sqlite(path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Lee las tres tablas en solo lectura."""
+
     if not path.exists():
         raise FileNotFoundError(f"No existe la base SQLite: {path}")
 

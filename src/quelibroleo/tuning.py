@@ -127,22 +127,30 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
+    """Exige un diccionario no vacío."""
+
     if not isinstance(value, dict) or not value:
         raise ValueError(f"{label} debe ser un objeto con valores")
     return value
 
 
 def _number_map(value: Any, label: str) -> dict[str, float]:
+    """Convierte los valores de un diccionario a float."""
+
     return {str(key): float(_number(item, f"{label}.{key}")) for key, item in _mapping(value, label).items()}
 
 
 def _number(value: Any, label: str) -> int | float:
+    """Acepta int o float. Un bool no cuenta como número."""
+
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{label} no es numérico")
     return value
 
 
 def _as_int(value: Any, label: str) -> int:
+    """Entero no negativo. Rechaza un float con parte decimal."""
+
     number = _number(value, label)
     if isinstance(number, float) and not number.is_integer():
         raise ValueError(f"{label} debe ser entero")
@@ -153,6 +161,8 @@ def _as_int(value: Any, label: str) -> int:
 
 
 def _plain(value: Any) -> Any:
+    """Saca un escalar de numpy para poder guardarlo en JSON."""
+
     if isinstance(value, np.generic):
         return value.item()
     return value
@@ -163,6 +173,8 @@ def _leaves_are_impossible(
     *,
     n_rows: int | None,
 ) -> bool:
+    """True si num_leaves no cabe en la profundidad o en las filas de train."""
+
     num_leaves = int(parameters["num_leaves"])
     min_child_samples = int(parameters["min_child_samples"])
     max_depth = int(parameters["max_depth"])
@@ -195,6 +207,8 @@ def tune_pipeline(
         raise ValueError("No hay fuentes para ajustar")
 
     def objective(trial: Any) -> float:
+        """NDCG@20 del último fold para un corte, unos pesos y un LambdaRank."""
+
         cutoff = int(retrieval.search.rrf_cutoff.suggest(trial, "rrf_cutoff"))
         weights = {
             source: float(

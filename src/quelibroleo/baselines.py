@@ -20,6 +20,8 @@ class PopularityRecommender:
         interactions: pd.DataFrame,
         eligible_items: set[str] | None = None,
     ) -> PopularityRecommender:
+        """Ordena el catálogo por cantidad de interacciones en el train."""
+
         counts = (
             interactions.groupby(ITEM_COL, as_index=False)
             .size()
@@ -40,6 +42,8 @@ class PopularityRecommender:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
+        """Aplica ese orden a cada lector y salta los libros ya leídos."""
+
         if self.ranking_ is None:
             raise RuntimeError("El recomendador debe entrenarse antes de recomendar")
         if n < 1:

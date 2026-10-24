@@ -133,6 +133,8 @@ class ServingIndex:
         user_id: str,
         ratings: list[tuple[str, int]],
     ) -> dict[str, Any]:
+        """Top-20 del lector, mezclando el historial guardado con la sesión."""
+
         missing = unknown_book_ids(
             [item_id for item_id, _rating in ratings], set(self.books)
         )
@@ -206,6 +208,8 @@ def load_serving_index(artifact: str | Path, db_path: str | Path) -> ServingInde
 
 
 def _book_card(row: dict[str, Any]) -> dict[str, str]:
+    """Ficha de un libro para la respuesta de la API."""
+
     return {
         "titulo": _text(row.get("titulo")),
         "autor": _text(row.get("autor")),
@@ -219,18 +223,24 @@ def _book_card(row: dict[str, Any]) -> dict[str, str]:
 
 
 def _missing(value: object) -> bool:
+    """True si el valor es nulo o NaN."""
+
     if value is None:
         return True
     return bool(pd.isna(value))
 
 
 def _text(value: object) -> str:
+    """Texto recortado, o cadena vacía si falta."""
+
     if _missing(value):
         return ""
     return str(value).strip()
 
 
 def _year(value: object) -> str:
+    """Año de edición entre 1000 y 2100, o cadena vacía."""
+
     if _missing(value):
         return ""
     try:
@@ -243,6 +253,8 @@ def _year(value: object) -> str:
 
 
 def _isbn(value: object) -> str:
+    """ISBN como texto, sin el decimal que deja un float."""
+
     if _missing(value):
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -365,6 +377,8 @@ def recommend_user(
 
 
 def _retrievers_for(config: PipelineConfig) -> list[Any]:
+    """Las mismas fuentes que el entrenamiento, para exportar el artefacto."""
+
     retrieval = config.retrieval
     return build_default_retrievers(
         random_state=config.random_seed,
@@ -376,6 +390,8 @@ def _retrievers_for(config: PipelineConfig) -> list[Any]:
 
 
 def _empty_history() -> pd.DataFrame:
+    """Historial vacío con las columnas y los tipos del resto del pipeline."""
+
     return pd.DataFrame(
         {
             USER_COL: pd.Series(dtype="str"),
@@ -387,6 +403,8 @@ def _empty_history() -> pd.DataFrame:
 
 
 def _profile(history: pd.DataFrame, user_id: str) -> pd.DataFrame:
+    """Filas de un lector, con fecha y rating ya tipados."""
+
     columns = [USER_COL, ITEM_COL, DATE_COL, RATING_COL]
     if history.empty:
         return _empty_history()
@@ -404,6 +422,8 @@ def _recommend_source(
     history: pd.DataFrame,
     n: int,
 ) -> pd.DataFrame:
+    """Candidatos de una fuente. ALS recalcula el factor de este lector."""
+
     if isinstance(retriever, ImplicitMFRetriever) and retriever.algorithm == "als":
         return _als_fold_in(retriever, user_id, history, n)
     return retriever.recommend([user_id], history, n)
@@ -478,6 +498,8 @@ def _builder_for_request(
 
 
 def _ensure_ranker_columns(frame: pd.DataFrame, columns: tuple[str, ...]) -> None:
+    """Rellena con NaN las features que el ranker espera y este request no trae."""
+
     for column in columns:
         if column not in frame:
             frame[column] = np.nan
@@ -490,6 +512,8 @@ def _fill_with_popularity(
     chosen: list[str],
     n: int,
 ) -> list[str]:
+    """Completa el top con popularidad, sin repetir ni devolver lo ya bloqueado."""
+
     popularity = _popularity(model)
     blocker = pd.DataFrame(
         {USER_COL: user_id, ITEM_COL: list(blocked)},
@@ -505,6 +529,8 @@ def _fill_with_popularity(
 
 
 def _popularity(model: ServingModel) -> PopularityRecommender:
+    """Fuente de popularidad guardada en el artefacto."""
+
     for retriever in model.retrievers:
         if isinstance(retriever, PopularityRecommender):
             return retriever

@@ -28,6 +28,8 @@ class RatingIn(BaseModel):
     @field_validator("id_libro")
     @classmethod
     def strip_book(cls, value: str) -> str:
+        """Recorta espacios y rechaza un id de libro vacío."""
+
         text = value.strip()
         if not text:
             raise ValueError("id_libro vacío")
@@ -41,6 +43,8 @@ class RecommendIn(BaseModel):
     @field_validator("id_lector")
     @classmethod
     def strip_user(cls, value: str) -> str:
+        """Recorta espacios y rechaza un id de lector vacío."""
+
         text = value.strip()
         if not text:
             raise ValueError("ID de lector requerido")
@@ -67,6 +71,8 @@ class RecommendOut(BaseModel):
 
 
 def _origins() -> list[str]:
+    """Orígenes CORS, separados por coma en ``CORS_ORIGINS``."""
+
     raw = os.environ.get(
         "CORS_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173",
@@ -76,6 +82,8 @@ def _origins() -> list[str]:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Carga el artefacto al arrancar y lo suelta al apagar."""
+
     global _INDEX
     artifact = Path(os.environ.get("SERVING_ARTIFACT", "artifacts/serving.joblib"))
     db_path = Path(os.environ.get("SERVING_DB", "data.db"))
@@ -96,11 +104,15 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, bool]:
+    """Listo cuando el artefacto terminó de cargar."""
+
     return {"ready": _INDEX is not None}
 
 
 @app.post("/recomendaciones", response_model=RecommendOut)
 def recomendaciones(body: RecommendIn) -> dict[str, object]:
+    """Top-20 de un lector, con las valoraciones de esta sesión."""
+
     if _INDEX is None:
         raise HTTPException(status_code=503, detail="El modelo todavía no está cargado")
     ratings: dict[str, int] = {}

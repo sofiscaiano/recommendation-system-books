@@ -24,20 +24,26 @@ class Retriever(Protocol):
 
     def fit(
         self, interactions: pd.DataFrame, catalog: pd.DataFrame
-    ) -> Retriever: ...
+    ) -> Retriever:
+        """Ajusta la fuente con el historial y el catálogo de ese corte."""
+        ...
 
     def recommend(
         self,
         users: list[str] | tuple[str, ...],
         history: pd.DataFrame,
         n: int,
-    ) -> pd.DataFrame: ...
+    ) -> pd.DataFrame:
+        """Ranking de la fuente, con columnas source, score y rank."""
+        ...
 
 
 def _recency_weights(
     frame: pd.DataFrame,
     half_life_days: float,
 ) -> np.ndarray:
+    """Peso exponencial según la edad respecto de la última lectura del lector."""
+
     if half_life_days <= 0:
         return np.ones(len(frame), dtype=np.float32)
     max_dates = frame.groupby(USER_COL)[DATE_COL].transform("max")
@@ -53,6 +59,8 @@ def _rank_scores(
     n: int,
     seen: set[str],
 ) -> list[dict[str, object]]:
+    """Top-n de un lector, sin vistos, con desempate estable por id_libro."""
+
     if n <= 0 or len(items) == 0:
         return []
     allowed = np.fromiter((item not in seen for item in items), dtype=bool)
@@ -106,6 +114,8 @@ class ItemCosineRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> ItemCosineRetriever:
+        """Construye la matriz dispersa ítem × usuario, ponderada por rating y recencia."""
+
         eligible = set(catalog[ITEM_COL].astype(str))
         fit_data = interactions[interactions[ITEM_COL].isin(eligible)].copy()
         self.item_ids_ = np.array(sorted(eligible), dtype=object)
@@ -145,6 +155,8 @@ class ItemCosineRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
+        """Ranking por producto interno entre el perfil del lector y cada ítem."""
+
         if self.item_ids_ is None or self.item_user_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -226,6 +238,8 @@ class ImplicitMFRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> ImplicitMFRetriever:
+        """Factoriza la matriz usuario × ítem con confianza de rating y recencia."""
+
         try:
             from implicit.als import AlternatingLeastSquares
             from implicit.bpr import BayesianPersonalizedRanking
@@ -279,6 +293,8 @@ class ImplicitMFRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
+        """Ranking de ALS o BPR, sin los ítems que el lector ya vio."""
+
         if self.model_ is None or self.user_item_ is None or self.item_ids_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -327,6 +343,8 @@ class TfidfRetriever:
 
     @staticmethod
     def _text(catalog: pd.DataFrame) -> pd.Series:
+        """Texto de título, autor, género, editorial y resumen de cada libro."""
+
         fields = ["titulo", "autor", "genero", "editorial", "resumen"]
         available = [field for field in fields if field in catalog]
         text = catalog[available].fillna("").astype(str).agg(" ".join, axis=1)
@@ -338,6 +356,8 @@ class TfidfRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> TfidfRetriever:
+        """Vectoriza el catálogo. El historial no entra: el perfil se arma al recomendar."""
+
         del interactions
         fit_catalog = catalog.drop_duplicates(ITEM_COL).sort_values(ITEM_COL)
         self.item_ids_ = fit_catalog[ITEM_COL].astype(str).to_numpy()
@@ -368,6 +388,8 @@ class TfidfRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
+        """Coseno entre el perfil de texto del lector y cada libro no leído."""
+
         if self.item_matrix_ is None or self.item_ids_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -552,6 +574,8 @@ class CandidateFusion:
         self.rrf_k = rrf_k
 
     def fuse(self, candidates: pd.DataFrame, cutoff: int) -> FusionResult:
+        """Suma 1/(k+rank) por fuente y se queda con el prefijo del ranking fusionado."""
+
         if cutoff < 1:
             raise ValueError("cutoff debe ser positivo")
         empty = pd.DataFrame(

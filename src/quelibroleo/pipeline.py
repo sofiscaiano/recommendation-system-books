@@ -84,6 +84,8 @@ class TrainedPipeline:
 
 
 def _make_retrievers(config: PipelineConfig) -> list[Any]:
+    """Fuentes activas con los hiperparámetros fijos de la config."""
+
     retrieval = config.retrieval
     return build_default_retrievers(
         random_state=config.random_seed,
@@ -103,6 +105,8 @@ def _collect_material(
     fold: int,
     per_source: int,
 ) -> FoldMaterial:
+    """Entrena las fuentes y el builder de un fold, sin fusionar todavía."""
+
     LOGGER.info(
         "Entrenando retrievers del fold %s para %s usuarios",
         fold,
@@ -128,6 +132,8 @@ def _collect_material(
 
 
 def _active_source_names(config: PipelineConfig) -> tuple[str, ...]:
+    """Nombres de las fuentes que esta corrida entrena."""
+
     return tuple(retriever.source_name for retriever in _make_retrievers(config))
 
 
@@ -151,6 +157,8 @@ def _weights_for_active_sources(
 
 
 def _fusion_from_config(config: PipelineConfig) -> tuple[CandidateFusion, int]:
+    """Fusión y corte de RRF con los pesos fijos, sin Optuna."""
+
     retrieval = config.retrieval
     return (
         CandidateFusion(
@@ -166,6 +174,8 @@ def _material_to_features(
     fusion: CandidateFusion,
     cutoff: int,
 ) -> tuple[FeatureSet, FusionResult]:
+    """Fusiona candidatos, arma features y les pone la relevancia del target."""
+
     fused = fusion.fuse(material.source_candidates, cutoff)
     features = material.feature_builder.transform(
         fused.candidates,
@@ -180,6 +190,8 @@ def _material_to_features(
 
 
 def _concat_feature_sets(sets: list[FeatureSet]) -> FeatureSet:
+    """Apila folds y rellena con NaN las columnas que faltan en alguno."""
+
     if not sets:
         raise ValueError("No hay folds de features para concatenar")
     feature_columns = tuple(
@@ -371,6 +383,8 @@ def _score_history(
     books: pd.DataFrame,
     config: PipelineConfig,
 ) -> tuple[pd.DataFrame, FusionResult, FeatureSet]:
+    """Recupera, fusiona y rankea un historial con el modelo ya entrenado."""
+
     material = _collect_material(
         train,
         target=train.iloc[0:0].copy(),
@@ -422,6 +436,8 @@ def _evaluate(
     tune: bool,
     save_artifacts: bool,
 ) -> tuple[EvaluationReport, TrainedPipeline | None]:
+    """Corre el modelo sobre el hold-out y, si corresponde, escribe artifacts/."""
+
     from .models import build_model
 
     experiment = load_experiment(config, holdout=True)
@@ -505,6 +521,8 @@ def _evaluate(
 
 
 def _retrieval_of(model: object, experiment: Experiment) -> tuple[float, float, int]:
+    """Recall, NDCG oracle y corte de candidatos. Ceros si el modelo no recupera."""
+
     fused = getattr(model, "fused", None)
     trained = getattr(model, "trained", None)
     if fused is None or not isinstance(trained, TrainedPipeline):
@@ -514,6 +532,8 @@ def _retrieval_of(model: object, experiment: Experiment) -> tuple[float, float, 
 
 
 def _mean_for(values: pd.Series, users: set[str]) -> tuple[float, int]:
+    """Media del NDCG en un subconjunto de lectores, y cuántos entraron."""
+
     selected = values[values.index.astype(str).isin(users)]
     if selected.empty:
         return 0.0, 0
@@ -556,6 +576,8 @@ def _submit(
     tune: bool,
     output_path: str | Path | None,
 ) -> pd.DataFrame:
+    """Reentrena con toda la historia y escribe el CSV de entrega."""
+
     from .models import build_model
 
     experiment = load_experiment(config, holdout=False)
@@ -618,6 +640,8 @@ class TwoStage:
         self._experiment: Experiment | None = None
 
     def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+        """Entrena retrieval y LambdaRank. Las ablaciones solo corren en evaluate."""
+
         self._experiment = experiment
         self.trained = train_ranker_from_history(
             experiment.history,
@@ -628,6 +652,8 @@ class TwoStage:
         )
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        """Rankea a esos lectores y guarda los candidatos fusionados."""
+
         if self.trained is None or self._experiment is None:
             raise RuntimeError("El modelo debe entrenarse antes de recomendar")
         recommendations, fused, _ = _score_history(
@@ -642,6 +668,8 @@ class TwoStage:
 
 
 def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:
+    """Pesos, corte y parámetros de LambdaRank que produjo esta corrida."""
+
     ranker_values = asdict(trained.ranker.config)
     ranker_values.pop("search", None)
     ranker_values.update(trained.ranker.overrides)

@@ -12,6 +12,8 @@ from .data import ITEM_COL, RATING_COL, USER_COL
 
 
 def _recommendation_order(recommendations: pd.DataFrame) -> pd.DataFrame:
+    """Ordena el ranking por ``rank``, o por ``score`` si no hay rango."""
+
     if "rank" in recommendations:
         return recommendations.sort_values([USER_COL, "rank", ITEM_COL])
     if "score" in recommendations:
@@ -90,6 +92,8 @@ def ndcg_at_k(
     *,
     k: int = 20,
 ) -> float:
+    """Media simple del NDCG@k entre los usuarios de la verdad."""
+
     values = ndcg_per_user(recommendations, truth, k=k)
     return float(values.mean()) if not values.empty else 0.0
 
@@ -110,6 +114,8 @@ def retrieval_metrics(
     *,
     k: int = 20,
 ) -> RetrievalMetrics:
+    """Recall de los positivos, recall ponderado por rating y techo de NDCG."""
+
     users = sorted(truth[USER_COL].astype(str).unique())
     candidates_by_user = candidates.groupby(USER_COL)[ITEM_COL].agg(set).to_dict()
     recalls: list[float] = []

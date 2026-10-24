@@ -17,6 +17,8 @@ class SearchRange:
     integer: bool = False
 
     def suggest(self, trial: Any, name: str) -> float | int:
+        """Pide a Optuna un entero o un float dentro de este intervalo."""
+
         if self.integer:
             return trial.suggest_int(name, int(self.low), int(self.high), log=self.log)
         return trial.suggest_float(name, self.low, self.high, log=self.log)

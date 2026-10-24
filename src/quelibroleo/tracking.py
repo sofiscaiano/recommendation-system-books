@@ -138,10 +138,14 @@ def archive_submission(
 
 
 def _dump(payload: dict[str, Any]) -> str:
+    """JSON legible, con tipos de numpy ya convertidos."""
+
     return json.dumps(_json_ready(payload), ensure_ascii=False, indent=2) + "\n"
 
 
 def _json_ready(value: Any) -> Any:
+    """Deja solo tipos que json.dumps acepta."""
+
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     if isinstance(value, dict):
@@ -164,6 +168,8 @@ def study_name(stage: str) -> str:
 
 
 def _git(*args: str) -> str | None:
+    """Salida de un comando git, o None si el repo no responde."""
+
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -203,6 +209,8 @@ def tracking_uri() -> str:
 
 
 def _flatten(prefix: str, value: Any, output: dict[str, str]) -> None:
+    """Aplana un diccionario anidado a claves con punto, recortadas a 500 caracteres."""
+
     if isinstance(value, dict):
         for key, nested in value.items():
             child = f"{prefix}.{key}" if prefix else str(key)
@@ -216,6 +224,8 @@ def _flatten(prefix: str, value: Any, output: dict[str, str]) -> None:
 
 
 def _params(config: PipelineConfig, *, command: str, tune: bool) -> dict[str, str]:
+    """Parámetros de la corrida para MLflow, incluida la config aplanada."""
+
     flat: dict[str, str] = {}
     _flatten("", config.as_dict(), flat)
     flat["command"] = command
@@ -237,6 +247,8 @@ _PUBLISHED_METRICS = (
 
 
 def _metrics(report: EvaluationReport) -> dict[str, float]:
+    """Métricas del hold-out que se publican en MLflow."""
+
     raw = asdict(report)
     return {key: float(raw[key]) for key in _PUBLISHED_METRICS}
 
@@ -329,6 +341,8 @@ def optuna_callback(stage: str):
     """Registra cada trial como un step de la corrida del study."""
 
     def _callback(study: Any, trial: Any) -> None:
+        """Un step por trial, con el NDCG objetivo."""
+
         import mlflow
 
         if mlflow.active_run() is None or trial.value is None:
@@ -341,6 +355,8 @@ def optuna_callback(stage: str):
 
 
 def _contour_params(study: Any) -> list[str] | None:
+    """Hasta seis parámetros para el gráfico de contorno, por importancia si hay más."""
+
     names = list(study.best_params)
     if len(names) <= 6:
         return names or None

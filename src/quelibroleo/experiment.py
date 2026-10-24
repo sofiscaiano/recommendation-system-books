@@ -107,5 +107,7 @@ def fill_submission(
 
 
 def _submit_users(config: PipelineConfig) -> list[str]:
+    """Lectores de ``ejemplo.csv``, en ese orden y sin duplicar."""
+
     example = pd.read_csv(config.example_path, dtype=str)
     return list(dict.fromkeys(example[USER_COL].astype(str)))
