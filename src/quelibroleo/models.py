@@ -1,4 +1,4 @@
-"""Modelos intercambiables. El corte de datos vive en ``experiment.py``."""
+"""Modelos intercambiables. El corte de datos vive en ``split_data.py``."""
 
 from __future__ import annotations
 
@@ -9,18 +9,18 @@ import pandas as pd
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
 from .data import ITEM_COL, observed_catalog
-from .experiment import Experiment
+from .split_data import SplitData
 
 MODEL_NAMES = ("two_stage", "popularity")
 
 
 class Recommender(Protocol):
-    """``fit`` ve el train del experimento. ``recommend`` devuelve ``rank`` desde 1."""
+    """``fit`` entrena con el train del corte. ``recommend`` devuelve ``rank`` desde 1."""
 
     name: str
 
-    def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
-        """Entrena solo con ``experiment.history``. ``tune`` es opcional."""
+    def fit(self, split: SplitData, *, tune: bool = False) -> None:
+        """Entrena solo con ``split.history``. ``tune`` es opcional."""
         ...
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
@@ -33,13 +33,13 @@ class PopularityModel:
 
     name = "popularity"
 
-    def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+    def fit(self, split: SplitData, *, tune: bool = False) -> None:
         """Cuenta interacciones del train. Ignora ``tune``: no tiene hiperparámetros."""
 
         del tune
-        catalog = set(observed_catalog(experiment.history, experiment.books)[ITEM_COL])
-        self._model = PopularityRecommender().fit(experiment.history, catalog)
-        self._history = experiment.history
+        catalog = set(observed_catalog(split.history, split.books)[ITEM_COL])
+        self._model = PopularityRecommender().fit(split.history, catalog)
+        self._history = split.history
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
         """Top-20 global, saltando lo que cada lector ya leyó."""

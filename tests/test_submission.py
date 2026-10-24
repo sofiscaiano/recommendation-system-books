@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from quelibroleo.baselines import PopularityRecommender
-from quelibroleo.experiment import fill_submission
+from quelibroleo.submission import fill_submission
 
 
 def test_submission_has_twenty_unique_unseen_books_per_user() -> None:

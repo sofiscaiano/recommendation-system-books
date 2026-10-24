@@ -26,8 +26,8 @@ from .data import (
     load_dataset,
     observed_catalog,
 )
-from .features import FeatureBuilder
 from .ranker import LambdaRanker
+from .ranker_columns import ColumnBuilder
 from .retrieval import (
     CANDIDATE_COLUMNS,
     CandidateFusion,
@@ -57,7 +57,7 @@ class ServingModel:
 
     ranker: LambdaRanker
     retrievers: list[Any]
-    feature_builder: FeatureBuilder
+    feature_builder: ColumnBuilder
     weights: dict[str, float]
     rrf_cutoff: int
     rrf_k: float
@@ -91,7 +91,7 @@ def export_serving_artifact(
         len(interactions),
     )
     retrievers = fit_retrievers(retrievers_from_config(config), interactions, catalog)
-    builder = FeatureBuilder().fit(interactions, catalog)
+    builder = ColumnBuilder().fit(interactions, catalog)
     model = ServingModel(
         ranker=trained.ranker,
         retrievers=retrievers,
@@ -415,12 +415,12 @@ def _recommend_source(
 
 
 def _builder_for_request(
-    builder: FeatureBuilder,
+    builder: ColumnBuilder,
     history: pd.DataFrame,
-) -> FeatureBuilder:
+) -> ColumnBuilder:
     """Copia superficial: las tablas de usuario son nuevas, el resto se comparte."""
 
-    clone = FeatureBuilder(recent_n=builder.recent_n, smoothing=builder.smoothing)
+    clone = ColumnBuilder(recent_n=builder.recent_n, smoothing=builder.smoothing)
     clone.__dict__ = dict(builder.__dict__)
     frames = builder.user_frames_for(history)
     clone.user_stats_ = frames["user_stats"]

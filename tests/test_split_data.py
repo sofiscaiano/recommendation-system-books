@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 from quelibroleo.config import PipelineConfig
-from quelibroleo.experiment import validation_folds
 from quelibroleo.models import MODEL_NAMES, PopularityModel, build_model
+from quelibroleo.split_data import validation_folds
 
 
 def _history() -> pd.DataFrame:

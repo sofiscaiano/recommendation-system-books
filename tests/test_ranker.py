@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 from quelibroleo.config import RankerConfig
-from quelibroleo.features import FeatureBuilder, attach_relevance
 from quelibroleo.ranker import LambdaRanker
+from quelibroleo.ranker_columns import ColumnBuilder, attach_relevance
 
 
 def test_label_gain_is_configurable_and_reaches_lightgbm() -> None:
@@ -69,7 +69,7 @@ def test_features_labels_and_lambdarank_roundtrip() -> None:
         columns=["id_lector", "id_libro", "rating"],
     )
 
-    features = FeatureBuilder(recent_n=2).fit(train, catalog).transform(
+    features = ColumnBuilder(recent_n=2).fit(train, catalog).transform(
         fused, source
     )
     labeled = attach_relevance(features, target, query_suffix="__test")

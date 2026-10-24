@@ -8,8 +8,8 @@ import pytest
 
 from quelibroleo.config import PipelineConfig, RankerConfig
 from quelibroleo.data import ITEM_COL, USER_COL, observed_catalog
-from quelibroleo.features import FeatureBuilder, attach_relevance
 from quelibroleo.ranker import LambdaRanker
+from quelibroleo.ranker_columns import ColumnBuilder, attach_relevance
 from quelibroleo.retrieval import (
     CandidateFusion,
     fit_retrievers,
@@ -112,7 +112,7 @@ def fitted() -> tuple[ServingModel, pd.DataFrame, list[str]]:
     observed = observed_catalog(interactions, catalog)
     config = PipelineConfig()
     retrievers = fit_retrievers(retrievers_from_config(config), interactions, observed)
-    builder = FeatureBuilder().fit(interactions, observed)
+    builder = ColumnBuilder().fit(interactions, observed)
     model = ServingModel(
         ranker=LambdaRanker(),
         retrievers=retrievers,

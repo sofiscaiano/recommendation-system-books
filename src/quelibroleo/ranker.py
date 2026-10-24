@@ -10,7 +10,7 @@ import pandas as pd
 
 from .config import LABEL_GAIN_MODES, RankerConfig
 from .data import ITEM_COL, USER_COL
-from .features import FeatureSet
+from .ranker_columns import RankerTable
 
 LABEL_GAINS: dict[str, tuple[int, ...]] = {
     "linear": tuple(range(11)),
@@ -76,8 +76,8 @@ class LambdaRanker:
 
     def fit(
         self,
-        train: FeatureSet,
-        validation: FeatureSet | None = None,
+        train: RankerTable,
+        validation: RankerTable | None = None,
     ) -> LambdaRanker:
         """Entrena por grupo. Si hay validación, corta con early stopping."""
 
@@ -120,7 +120,7 @@ class LambdaRanker:
         self.best_iteration_ = model.best_iteration_
         return self
 
-    def predict(self, features: FeatureSet) -> pd.DataFrame:
+    def predict(self, features: RankerTable) -> pd.DataFrame:
         """Puntúa y ordena por score descendente, con desempate por id_libro."""
 
         if self.model_ is None:

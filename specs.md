@@ -89,7 +89,7 @@ LightGBM LambdaRank ordena los candidatos. Cada lector es un grupo. La etiqueta 
 
 Cambiar `label_gain` exige un `evaluate --tune` nuevo: el archivo guardado se eligió con la ganancia anterior. `lambdarank_truncation_level` y `eval_at` quedan en 20. El desempate del score es estable por `id_libro`.
 
-Las features son numéricas: scores y rangos de cada fuente, estadísticas de lector e ítem, afinidad de autor y género, y señales de secuencia. Autor y género no entran como categóricas de alta cardinalidad; la editorial queda en el texto de TF-IDF.
+Las columnas del ranker (`ranker_columns.py`) son numéricas: scores y rangos de cada fuente, estadísticas de lector e ítem, afinidad de autor y género, y señales de secuencia. Autor y género no entran como categóricas de alta cardinalidad; la editorial queda en el texto de TF-IDF.
 
 ## Hiperparámetros
 
@@ -113,8 +113,9 @@ uv run python main.py export-serving
 ```
 
 `--model` elige el algoritmo (`two_stage` o `popularity`). Train, folds de
-validación y test salen siempre de `experiment.py`. La entrega sigue siendo
-`submission.csv` con los lectores de `ejemplo.csv`.
+validación y test salen siempre de `split_data.py`. La entrega sigue siendo
+`submission.csv` con los lectores de `ejemplo.csv`. Las columnas numéricas
+del ranker están en `ranker_columns.py`.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 

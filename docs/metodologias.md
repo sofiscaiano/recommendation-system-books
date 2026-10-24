@@ -164,9 +164,9 @@ con los pesos ya normalizados. Sin `--tune`, el entrenamiento de la evaluación
 y de la entrega usa ese archivo. Un archivo de una búsqueda anterior, con
 cuotas, no se reutiliza.
 
-### Features del ranker
+### Columnas del ranker
 
-`FeatureBuilder` (`src/quelibroleo/features.py`) arma, con el historial
+`ColumnBuilder` (`src/quelibroleo/ranker_columns.py`) arma, con el historial
 anterior al corte:
 
 | Grupo | Qué aporta |

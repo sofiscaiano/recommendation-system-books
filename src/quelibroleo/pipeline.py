@@ -15,14 +15,6 @@ import pandas as pd
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
 from .data import ITEM_COL, observed_catalog
-from .experiment import (
-    Experiment,
-    fill_submission,
-    load_experiment,
-    seen_history,
-    validation_folds,
-)
-from .features import FeatureBuilder, FeatureSet, attach_relevance
 from .metrics import (
     ndcg_at_k,
     ndcg_per_user,
@@ -30,6 +22,7 @@ from .metrics import (
     rows_against_reference,
 )
 from .ranker import LambdaRanker
+from .ranker_columns import ColumnBuilder, RankerTable, attach_relevance
 from .retrieval import (
     CandidateFusion,
     FusionResult,
@@ -38,6 +31,8 @@ from .retrieval import (
     retrieve_all,
     retrievers_from_config,
 )
+from .split_data import SplitData, load_split, seen_books, validation_folds
+from .submission import fill_submission
 from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
 
 LOGGER = logging.getLogger(__name__)
@@ -52,7 +47,7 @@ class FoldMaterial:
     target: pd.DataFrame
     catalog: pd.DataFrame
     source_candidates: pd.DataFrame
-    feature_builder: FeatureBuilder
+    feature_builder: ColumnBuilder
 
 
 @dataclass(frozen=True)
@@ -107,7 +102,7 @@ def _collect_material(
         train,
         per_source=per_source,
     )
-    builder = FeatureBuilder().fit(train, catalog)
+    builder = ColumnBuilder().fit(train, catalog)
     return FoldMaterial(
         fold=fold,
         train=train,
@@ -160,7 +155,7 @@ def _material_to_features(
     material: FoldMaterial,
     fusion: CandidateFusion,
     cutoff: int,
-) -> tuple[FeatureSet, FusionResult]:
+) -> tuple[RankerTable, FusionResult]:
     """Fusiona candidatos, arma features y les pone la relevancia del target."""
 
     fused = fusion.fuse(material.source_candidates, cutoff)
@@ -176,7 +171,7 @@ def _material_to_features(
     return labeled, fused
 
 
-def _concat_feature_sets(sets: list[FeatureSet]) -> FeatureSet:
+def _concat_feature_sets(sets: list[RankerTable]) -> RankerTable:
     """Apila folds y rellena con NaN las columnas que faltan en alguno."""
 
     if not sets:
@@ -191,7 +186,7 @@ def _concat_feature_sets(sets: list[FeatureSet]) -> FeatureSet:
             if column not in frame:
                 frame[column] = np.nan
         frames.append(frame)
-    return FeatureSet(
+    return RankerTable(
         frame=pd.concat(frames, ignore_index=True, sort=False),
         feature_columns=feature_columns,
     )
@@ -369,7 +364,7 @@ def _score_history(
     users: tuple[str, ...],
     books: pd.DataFrame,
     config: PipelineConfig,
-) -> tuple[pd.DataFrame, FusionResult, FeatureSet]:
+) -> tuple[pd.DataFrame, FusionResult, RankerTable]:
     """Recupera, fusiona y rankea un historial con el modelo ya entrenado."""
 
     material = _collect_material(
@@ -427,31 +422,31 @@ def _evaluate(
 
     from .models import build_model
 
-    experiment = load_experiment(config, holdout=True)
+    split = load_split(config, holdout=True)
     LOGGER.info(
         "Holdout listo: %s usuarios y %s interacciones de test",
-        len(experiment.evaluation_users),
-        len(experiment.test),
+        len(split.evaluation_users),
+        len(split.test),
     )
     model = build_model(config.model, config)
-    model.fit(experiment, tune=tune)
-    recommendations = model.recommend(experiment.evaluation_users)
+    model.fit(split, tune=tune)
+    recommendations = model.recommend(split.evaluation_users)
     LOGGER.info("Ranking del holdout completado")
     top20 = recommendations[recommendations["rank"] <= 20].copy()
 
     popularity = PopularityRecommender().fit(
-        experiment.history,
-        set(observed_catalog(experiment.history, experiment.books)[ITEM_COL]),
+        split.history,
+        set(observed_catalog(split.history, split.books)[ITEM_COL]),
     )
     baseline = popularity.recommend(
-        experiment.evaluation_users,
-        experiment.history,
+        split.evaluation_users,
+        split.history,
         n=20,
     )
-    baseline_per_user = ndcg_per_user(baseline, experiment.test)
-    model_per_user = ndcg_per_user(top20, experiment.test)
-    recall, oracle, budget = _retrieval_of(model, experiment)
-    submit_ids = set(experiment.submit_users)
+    baseline_per_user = ndcg_per_user(baseline, split.test)
+    model_per_user = ndcg_per_user(top20, split.test)
+    recall, oracle, budget = _retrieval_of(model, split)
+    submit_ids = set(split.submit_users)
     submit_model, submit_users = _mean_for(model_per_user, submit_ids)
     submit_baseline, _ = _mean_for(baseline_per_user, submit_ids)
     report = EvaluationReport(
@@ -463,7 +458,7 @@ def _evaluate(
         retrieval_recall=recall,
         retrieval_oracle_ndcg_at_20=oracle,
         candidate_budget=budget,
-        evaluation_users=len(experiment.evaluation_users),
+        evaluation_users=len(split.evaluation_users),
     )
 
     if save_artifacts:
@@ -478,7 +473,7 @@ def _evaluate(
         )
         (artifacts / "data_quality.json").write_text(
             json.dumps(
-                with_run_name(asdict(experiment.quality)),
+                with_run_name(asdict(split.quality)),
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -507,14 +502,14 @@ def _evaluate(
     return report, trained if isinstance(trained, TrainedPipeline) else None
 
 
-def _retrieval_of(model: object, experiment: Experiment) -> tuple[float, float, int]:
+def _retrieval_of(model: object, split: SplitData) -> tuple[float, float, int]:
     """Recall, NDCG oracle y corte de candidatos. Ceros si el modelo no recupera."""
 
     fused = getattr(model, "fused", None)
     trained = getattr(model, "trained", None)
     if fused is None or not isinstance(trained, TrainedPipeline):
         return 0.0, 0.0, 0
-    metrics = retrieval_metrics(fused.candidates, experiment.test)
+    metrics = retrieval_metrics(fused.candidates, split.test)
     return metrics.recall, metrics.oracle_ndcg, trained.rrf_cutoff
 
 
@@ -567,19 +562,19 @@ def _submit(
 
     from .models import build_model
 
-    experiment = load_experiment(config, holdout=False)
+    split = load_split(config, holdout=False)
     model = build_model(config.model, config)
-    model.fit(experiment, tune=tune)
-    ranked = model.recommend(experiment.submit_users)
-    catalog = observed_catalog(experiment.history, experiment.books)
+    model.fit(split, tune=tune)
+    ranked = model.recommend(split.submit_users)
+    catalog = observed_catalog(split.history, split.books)
     popularity = PopularityRecommender().fit(
-        experiment.history,
+        split.history,
         set(catalog[ITEM_COL]),
     )
     submission = fill_submission(
         ranked,
-        experiment.submit_users,
-        seen_history(experiment),
+        split.submit_users,
+        seen_books(split),
         popularity,
     )
     trained = getattr(model, "trained", None)
@@ -624,30 +619,30 @@ class TwoStage:
         self.config = config
         self.trained: TrainedPipeline | None = None
         self.fused: FusionResult | None = None
-        self._experiment: Experiment | None = None
+        self._split: SplitData | None = None
 
-    def fit(self, experiment: Experiment, *, tune: bool = False) -> None:
+    def fit(self, split: SplitData, *, tune: bool = False) -> None:
         """Entrena retrieval y LambdaRank. Las ablaciones solo corren en evaluate."""
 
-        self._experiment = experiment
+        self._split = split
         self.trained = train_ranker_from_history(
-            experiment.history,
-            experiment.books,
+            split.history,
+            split.books,
             self.config,
             tune=tune,
-            execute_ablations=experiment.holdout,
+            execute_ablations=split.holdout,
         )
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
         """Rankea a esos lectores y guarda los candidatos fusionados."""
 
-        if self.trained is None or self._experiment is None:
+        if self.trained is None or self._split is None:
             raise RuntimeError("El modelo debe entrenarse antes de recomendar")
         recommendations, fused, _ = _score_history(
             self.trained,
-            self._experiment.history,
+            self._split.history,
             tuple(users),
-            self._experiment.books,
+            self._split.books,
             self.config,
         )
         self.fused = fused
@@ -668,8 +663,8 @@ def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:
 
 
 def run_ablations(
-    train_features: FeatureSet,
-    validation_features: FeatureSet,
+    train_features: RankerTable,
+    validation_features: RankerTable,
     validation_truth: pd.DataFrame,
     config: PipelineConfig,
 ) -> pd.DataFrame:
@@ -689,20 +684,20 @@ def run_ablations(
         config.ranker,
         random_state=config.random_seed,
     ).fit(
-        FeatureSet(train_features.frame, reference_columns),
-        FeatureSet(validation_features.frame, reference_columns),
+        RankerTable(train_features.frame, reference_columns),
+        RankerTable(validation_features.frame, reference_columns),
     )
     reference_score = ndcg_at_k(
         reference_ranker.predict(
-            FeatureSet(validation_features.frame, reference_columns)
+            RankerTable(validation_features.frame, reference_columns)
         ),
         validation_truth,
     )
     rows = []
     for name, keep in groups.items():
         columns = tuple(column for column in reference_columns if keep(column))
-        train_subset = FeatureSet(train_features.frame, columns)
-        validation_subset = FeatureSet(validation_features.frame, columns)
+        train_subset = RankerTable(train_features.frame, columns)
+        validation_subset = RankerTable(validation_features.frame, columns)
         ranker = LambdaRanker(
             config.ranker,
             random_state=config.random_seed,
