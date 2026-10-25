@@ -13,7 +13,7 @@ import torch
 from torch import nn
 
 from .config import PipelineConfig
-from .neural import InteractionCatalog, NeuralRanker, TrainSchedule
+from .neural import InteractionCatalog, NeuralRanker, TrainSchedule, lookup_rows
 
 
 class _TwoTower(nn.Module):
@@ -61,8 +61,8 @@ class _TwoTower(nn.Module):
         features = torch.cat(
             [
                 self.book(items),
-                self.author(self.item_author[items]),
-                self.genre(self.item_genre[items]),
+                self.author(lookup_rows(self.item_author, items)),
+                self.genre(lookup_rows(self.item_genre, items)),
             ],
             dim=-1,
         )

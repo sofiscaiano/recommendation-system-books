@@ -56,6 +56,35 @@ class InteractionCatalog:
     genre_labels: tuple[str, ...]
 
 
+def place_on_device(net: nn.Module, device: torch.device) -> None:
+    """Pasa la red al dispositivo y deja los índices enteros en CPU.
+
+    Copiar un índice int64 desde MPS dispara un fallo de OpenMP en macOS.
+    """
+
+    net.to(device)
+    for name, buffer in list(net.named_buffers()):
+        if buffer.dtype != torch.long or buffer.device.type == "cpu":
+            continue
+        parent, _, attr = name.rpartition(".")
+        module = net.get_submodule(parent) if parent else net
+        threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            module.register_buffer(attr, buffer.detach().to("cpu"))
+        finally:
+            torch.set_num_threads(threads)
+
+
+def lookup_rows(table: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+    """Filas de una tabla de índices, aunque esa tabla esté en CPU."""
+
+    if table.device == index.device:
+        return table[index]
+    gathered = table.index_select(0, index.detach().to(device=table.device))
+    return gathered.to(device=index.device)
+
+
 def pick_device() -> torch.device:
     """MPS si está disponible, y CPU en caso contrario."""
 
@@ -163,7 +192,7 @@ def fit_neural(
     """
 
     device = pick_device()
-    net.to(device)
+    place_on_device(net, device)
     LOGGER.info("%s entrena en %s", model_name, device)
     optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
     rng = np.random.default_rng(config.random_seed)
@@ -269,12 +298,26 @@ def _save_checkpoint(
         "item_ids": [str(item) for item in catalog.item_ids],
         "authors": list(catalog.author_labels),
         "genres": list(catalog.genre_labels),
-        "state": {
-            key: value.detach().cpu().clone() for key, value in net.state_dict().items()
-        },
+        "state": _cpu_state(net),
     }
     torch.save(payload, path)
     LOGGER.info("%s guardó los pesos en %s", model_name, path)
+
+
+def _cpu_state(net: nn.Module) -> dict[str, torch.Tensor]:
+    """Copia los pesos a CPU de a uno. El copiado paralelo de int64 se cae en MPS."""
+
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        if torch.backends.mps.is_available():
+            torch.mps.synchronize()
+        return {
+            key: value.detach().to("cpu").contiguous().clone()
+            for key, value in net.state_dict().items()
+        }
+    finally:
+        torch.set_num_threads(threads)
 
 
 def _resume(

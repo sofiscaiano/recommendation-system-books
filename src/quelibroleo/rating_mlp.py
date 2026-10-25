@@ -12,7 +12,7 @@ import torch
 from torch import nn
 
 from .config import PipelineConfig
-from .neural import InteractionCatalog, NeuralRanker, TrainSchedule
+from .neural import InteractionCatalog, NeuralRanker, TrainSchedule, lookup_rows
 
 
 class _RatingMlp(nn.Module):
@@ -54,8 +54,8 @@ class _RatingMlp(nn.Module):
             [
                 self.user(users),
                 self.book(items),
-                self.author(self.item_author[items]),
-                self.genre(self.item_genre[items]),
+                self.author(lookup_rows(self.item_author, items)),
+                self.genre(lookup_rows(self.item_genre, items)),
             ],
             dim=-1,
         )
@@ -95,8 +95,8 @@ class RatingMlpModel(NeuralRanker):
         net = self._net
         device = next(net.parameters()).device
         n_items = net.book.num_embeddings
-        user_chunk = 32
-        item_chunk = 2048
+        user_chunk = 8
+        item_chunk = 1024
         blocks: list[np.ndarray] = []
         for user_start in range(0, len(user_indices), user_chunk):
             user_block = user_indices[user_start : user_start + user_chunk]
