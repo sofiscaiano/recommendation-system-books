@@ -2,14 +2,14 @@
 
 El usuario es un embedding de id_lector. Cada lectura real es una fila: el
 modelo predice su rating y el error es cuadrático contra (rating - 1) / 9.
-No hay libros negativos. El último fold interno elige los pesos; después se
-sigue entrenando, sin reiniciar, sobre toda la historia previa al hold-out.
+No hay libros negativos. En la evaluación se entrena con toda la historia
+previa al hold-out. En el submit se parte de ese mismo esquema y se suman
+algunas épocas en las que el hold-out ya entra.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,13 +20,12 @@ from torch import nn
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
 from .data import ITEM_COL, RATING_COL, USER_COL
-from .metrics import ndcg_at_k
-from .split_data import SplitData, validation_folds
+from .split_data import SplitData
+from .splits import leave_last_k
 
 LOGGER = logging.getLogger(__name__)
 TOP_K = 20
 _RATING_SPAN = 9.0
-_IMPROVEMENT = 1e-4
 
 
 @dataclass(frozen=True)
@@ -36,7 +35,6 @@ class TrainSchedule:
     learning_rate: float
     batch_size: int
     max_epochs: int
-    patience: int
     finetune_epochs: int
 
 
@@ -128,6 +126,18 @@ def init_embeddings(module: nn.Module) -> None:
                 nn.init.zeros_(layer.bias)
 
 
+def preholdout(history: pd.DataFrame, holdout_k: int) -> pd.DataFrame | None:
+    """Lecturas anteriores a las últimas ``holdout_k`` de cada lector.
+
+    Devuelve None si nadie tiene esas últimas lecturas para apartar.
+    """
+
+    outer = leave_last_k(history, k=holdout_k)
+    if outer.test.empty:
+        return None
+    return outer.train
+
+
 def fit_neural(
     net: nn.Module,
     catalog: InteractionCatalog,
@@ -136,11 +146,13 @@ def fit_neural(
     schedule: TrainSchedule,
     *,
     model_name: str,
-    recommend: Callable[[pd.DataFrame, list[str]], pd.DataFrame],
+    incorporate_holdout: bool,
 ) -> None:
-    """Entrena el último fold y sigue desde esos pesos sobre toda la historia.
+    """Entrena ``max_epochs`` sin el hold-out.
 
-    Si la historia no alcanza para un fold, entrena directo sobre ella.
+    En el submit, ``incorporate_holdout`` suma ``finetune_epochs`` sobre la
+    historia completa, desde los pesos que acaban de terminar. La evaluación
+    no hace esa segunda pasada: el NDCG del hold-out se mide afuera.
     """
 
     device = pick_device()
@@ -148,52 +160,37 @@ def fit_neural(
     LOGGER.info("%s entrena en %s", model_name, device)
     optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
     rng = np.random.default_rng(config.random_seed)
-    folds = _folds(history, config)
-    if not folds:
-        LOGGER.info("%s no tiene fold interno; entrena sobre toda la historia", model_name)
-        _run_epochs(
-            net,
-            training_rows(history, catalog),
-            optimizer,
-            schedule,
-            rng,
-            device,
-            epochs=schedule.max_epochs,
-            model_name=model_name,
-            phase="época",
-        )
-        return
-
-    fold = folds[-1]
-    best_score = -1.0
-    best_state = _clone_state(net)
-    stalled = 0
-    rows = training_rows(fold.train, catalog)
-    for epoch in range(1, schedule.max_epochs + 1):
-        loss = _epoch(net, rows, optimizer, schedule.batch_size, rng, device)
-        recommendations = recommend(fold.train, list(fold.query_users))
-        score = ndcg_at_k(recommendations, fold.target, k=TOP_K)
+    holdout_k = config.split.holdout_k
+    earlier = preholdout(history, holdout_k) if incorporate_holdout else None
+    first = history if earlier is None else earlier
+    if earlier is None:
         LOGGER.info(
-            "%s época %s: loss=%.4f ndcg=%.4f",
+            "%s entrena %s épocas con la historia previa al hold-out",
             model_name,
-            epoch,
-            loss,
-            score,
+            schedule.max_epochs,
         )
-        if score > best_score + _IMPROVEMENT:
-            best_score = score
-            best_state = _clone_state(net)
-            stalled = 0
-        else:
-            stalled += 1
-            if stalled >= schedule.patience:
-                break
-    net.load_state_dict(best_state)
-    if schedule.finetune_epochs < 1:
+    else:
+        LOGGER.info(
+            "%s entrena %s épocas sin las últimas %s lecturas de cada lector",
+            model_name,
+            schedule.max_epochs,
+            holdout_k,
+        )
+    _run_epochs(
+        net,
+        training_rows(first, catalog),
+        optimizer,
+        schedule,
+        rng,
+        device,
+        epochs=schedule.max_epochs,
+        model_name=model_name,
+        phase="época",
+    )
+    if earlier is None or schedule.finetune_epochs < 1:
         return
-    optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
     LOGGER.info(
-        "%s sigue desde el fold interno durante %s épocas",
+        "%s incorpora el hold-out durante %s épocas",
         model_name,
         schedule.finetune_epochs,
     )
@@ -282,10 +279,6 @@ class NeuralRanker:
         init_embeddings(net)
         self._net = net
         self._catalog = catalog
-
-        def recommend(frame: pd.DataFrame, users: list[str]) -> pd.DataFrame:
-            return self._recommend(frame, users)
-
         fit_neural(
             net,
             catalog,
@@ -293,7 +286,7 @@ class NeuralRanker:
             self.config,
             self.schedule(),
             model_name=self.name,
-            recommend=recommend,
+            incorporate_holdout=not split.holdout,
         )
         self._history = history
         self.hyperparameters = self.snapshot(catalog)
@@ -389,17 +382,6 @@ def _vocabulary(values: list[str]) -> dict[str, int]:
     return {"": 0, **{name: index + 1 for index, name in enumerate(names)}}
 
 
-def _folds(history: pd.DataFrame, config: PipelineConfig) -> list:
-    """Último fold usable, o ninguno si la historia es demasiado corta."""
-
-    try:
-        return validation_folds(history, config)
-    except ValueError as exc:
-        if "suficientes" not in str(exc):
-            raise
-        return []
-
-
 def _run_epochs(
     net: nn.Module,
     rows: tuple[np.ndarray, np.ndarray, np.ndarray],
@@ -412,7 +394,7 @@ def _run_epochs(
     model_name: str,
     phase: str,
 ) -> None:
-    """Varias épocas sin mirar el NDCG. Sirve para la continuación y el atajo."""
+    """Varias épocas sobre las lecturas indicadas. El optimizador sigue de la pasada anterior."""
 
     for epoch in range(1, epochs + 1):
         loss = _epoch(net, rows, optimizer, schedule.batch_size, rng, device)
@@ -447,12 +429,6 @@ def _epoch(
         optimizer.step()
         losses.append(float(loss.detach().cpu()))
     return float(np.mean(losses)) if losses else 0.0
-
-
-def _clone_state(net: nn.Module) -> dict[str, torch.Tensor]:
-    """Copia de los pesos en CPU, para volver a la mejor época."""
-
-    return {key: value.detach().cpu().clone() for key, value in net.state_dict().items()}
 
 
 def _mask_seen(scores: np.ndarray, item_index: dict[str, int], seen: set[str]) -> None:

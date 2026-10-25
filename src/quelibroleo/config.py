@@ -162,7 +162,6 @@ def _check_neural_schedule(
     learning_rate: float,
     batch_size: int,
     max_epochs: int,
-    patience: int,
     finetune_epochs: int,
 ) -> None:
     """Valida el bloque compartido por rating_mlp y two_tower."""
@@ -171,8 +170,8 @@ def _check_neural_schedule(
         raise ValueError("embedding_dim debe ser positivo")
     if learning_rate <= 0:
         raise ValueError("learning_rate debe ser positivo")
-    if min(batch_size, max_epochs, patience) < 1:
-        raise ValueError("batch_size, max_epochs y patience deben ser positivos")
+    if min(batch_size, max_epochs) < 1:
+        raise ValueError("batch_size y max_epochs deben ser positivos")
     if finetune_epochs < 0:
         raise ValueError("finetune_epochs no puede ser negativo")
 
@@ -191,7 +190,6 @@ class RatingMlpConfig:
     learning_rate: float = 0.001
     batch_size: int = 256
     max_epochs: int = 30
-    patience: int = 5
     finetune_epochs: int = 5
 
     def __post_init__(self) -> None:
@@ -200,7 +198,6 @@ class RatingMlpConfig:
             learning_rate=self.learning_rate,
             batch_size=self.batch_size,
             max_epochs=self.max_epochs,
-            patience=self.patience,
             finetune_epochs=self.finetune_epochs,
         )
         if min(self.hidden_1, self.hidden_2) < 1:
@@ -222,7 +219,6 @@ class TwoTowerConfig:
     learning_rate: float = 0.001
     batch_size: int = 256
     max_epochs: int = 30
-    patience: int = 5
     finetune_epochs: int = 5
 
     def __post_init__(self) -> None:
@@ -231,7 +227,6 @@ class TwoTowerConfig:
             learning_rate=self.learning_rate,
             batch_size=self.batch_size,
             max_epochs=self.max_epochs,
-            patience=self.patience,
             finetune_epochs=self.finetune_epochs,
         )
         if min(self.hidden_dim, self.output_dim) < 1:

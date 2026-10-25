@@ -103,7 +103,7 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 
-`rating_mlp` y `two_tower` no tienen study. Los hiperparámetros salen de `RatingMlpConfig` y `TwoTowerConfig`: embeddings de 512, Adam con learning rate 0,001, batch 256, tope de 30 épocas, paciencia 5 y 5 épocas de continuación sobre toda la historia previa al hold-out. `--tune` no abre un study para estos dos modelos. Un `two_tower_hyperparameters.json` viejo se ignora.
+`rating_mlp` y `two_tower` no tienen study. Los hiperparámetros salen de `RatingMlpConfig` y `TwoTowerConfig`: embeddings de 512, Adam con learning rate 0,001, batch 256 y 30 épocas sobre toda la historia previa al hold-out. El NDCG@20 de la evaluación se mide contra ese hold-out. En el submit, desde esos pesos, se suman `finetune_epochs` (defecto 5) con el hold-out ya incluido. `--tune` no abre un study para estos dos modelos. Un `two_tower_hyperparameters.json` viejo se ignora.
 
 ## Interfaz
 

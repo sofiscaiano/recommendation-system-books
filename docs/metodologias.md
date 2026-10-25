@@ -229,13 +229,13 @@ entrenamiento es una lectura real. No se muestrean libros que el lector no
 leyó. Quien no tiene historia, o no llega a 20 libros, completa con popularidad.
 
 No hay Optuna. Los hiperparámetros están en `RatingMlpConfig`: dimensión 512,
-capas 256 y 64, learning rate 0,001, batch 256, tope de 30 épocas, paciencia 5
-y 5 épocas de continuación. `--tune` no abre un study.
+capas 256 y 64, learning rate 0,001, batch 256 y 30 épocas. `--tune` no abre
+un study.
 
-El último fold interno aparta su ventana. Se entrena sobre lo anterior y, si el
-NDCG@20 no mejora durante la paciencia, se vuelve a la mejor época. Esos pesos
-siguen entrenando las épocas de continuación sobre toda la historia previa al
-hold-out, sin reiniciar la red. Las últimas 20 de la evaluación no entran.
+En la evaluación esas 30 épocas usan toda la historia anterior al hold-out, y
+el NDCG@20 se mide una vez contra las últimas 20. En el submit se repite esa
+misma pasada y, sin reiniciar los pesos, se suman `finetune_epochs` (defecto
+5) en las que el hold-out ya forma parte de la historia.
 
 ## Two-tower
 

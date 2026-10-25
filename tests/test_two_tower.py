@@ -6,12 +6,7 @@ import pandas as pd
 import pytest
 import torch
 
-from quelibroleo.config import (
-    PipelineConfig,
-    RatingMlpConfig,
-    SplitConfig,
-    TwoTowerConfig,
-)
+from quelibroleo.config import PipelineConfig, RatingMlpConfig, TwoTowerConfig
 from quelibroleo.data import DataQualityReport
 from quelibroleo.models import build_model
 from quelibroleo.split_data import SplitData
@@ -32,12 +27,17 @@ def _frame(rows: list[tuple[str, str, str, int]]) -> pd.DataFrame:
     ).assign(fecha=lambda frame: pd.to_datetime(frame["fecha"]))
 
 
-def _split(frame: pd.DataFrame, books: pd.DataFrame | None = None) -> SplitData:
+def _split(
+    frame: pd.DataFrame,
+    books: pd.DataFrame | None = None,
+    *,
+    holdout: bool = True,
+) -> SplitData:
     users = tuple(sorted(frame["id_lector"].unique()))
     if books is None:
         books = pd.DataFrame({"id_libro": sorted(frame["id_libro"].unique())})
     return SplitData(
-        holdout=True,
+        holdout=holdout,
         books=books,
         readers=pd.DataFrame({"id_lector": list(users)}),
         history=frame,
@@ -54,7 +54,6 @@ def _config(tmp_path, model: str, **overrides: object) -> PipelineConfig:
         "embedding_dim": 8,
         "learning_rate": 0.05,
         "max_epochs": 40,
-        "patience": 40,
         "finetune_epochs": 0,
         "batch_size": 8,
     }
@@ -115,7 +114,7 @@ def test_tune_does_not_write_a_study_or_touch_other_files(tmp_path, model: str) 
     two_stage.write_text("{}\n", encoding="utf-8")
     ease.write_text("{}\n", encoding="utf-8")
     frame = _neighbor_frame()
-    config = _config(tmp_path, model, max_epochs=1, patience=1)
+    config = _config(tmp_path, model, max_epochs=1)
     fitted = build_model(model, config)
     fitted.fit(_split(frame), tune=True)
 
@@ -159,32 +158,27 @@ def test_author_and_genre_get_their_own_rows(tmp_path) -> None:
     assert fitted.hyperparameters["n_genres"] == 2
 
 
-def test_inner_fold_continues_without_resetting(tmp_path) -> None:
-    rows = []
-    for user in ("u1", "u2"):
-        for offset in range(4):
-            rows.append((user, f"b{offset}", f"2020-01-{offset + 1:02d}", 6 + offset))
+def test_submit_trains_without_the_holdout_and_then_adds_it() -> None:
+    rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(25)]
     frame = _frame(rows)
-    config = PipelineConfig(
-        artifacts_dir=tmp_path,
-        model="two_tower",
-        random_seed=0,
-        split=SplitConfig(rolling_folds=1, rolling_horizon=1, min_history=1),
-        two_tower=TwoTowerConfig(
-            embedding_dim=4,
-            hidden_dim=4,
-            output_dim=4,
-            learning_rate=0.05,
-            batch_size=4,
-            max_epochs=1,
-            patience=1,
-            finetune_epochs=1,
-        ),
-    )
-    fitted = build_model("two_tower", config)
-    fitted.fit(_split(frame), tune=False)
 
-    seen = set(frame.loc[frame["id_lector"] == "u1", "id_libro"])
+    from quelibroleo.neural import preholdout
+
+    earlier = preholdout(frame, 20)
+
+    assert earlier is not None
+    assert len(earlier) == 5
+    assert set(earlier["id_libro"]) == {f"b{offset}" for offset in range(5)}
+
+
+def test_submit_fit_keeps_training_after_the_holdout_joins(tmp_path) -> None:
+    rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(25)]
+    frame = _frame(rows)
+    config = _config(tmp_path, "two_tower", max_epochs=1, finetune_epochs=1)
+    fitted = build_model("two_tower", config)
+    fitted.fit(_split(frame, holdout=False), tune=False)
+
+    seen = set(frame["id_libro"])
     ranking = fitted.recommend(["u1"])
     assert set(ranking["id_libro"]).isdisjoint(seen)
     assert fitted.hyperparameters["finetune_epochs"] == 1

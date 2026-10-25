@@ -85,7 +85,6 @@ class RatingMlpModel(NeuralRanker):
             learning_rate=block.learning_rate,
             batch_size=block.batch_size,
             max_epochs=block.max_epochs,
-            patience=block.patience,
             finetune_epochs=block.finetune_epochs,
         )
 
@@ -123,7 +122,6 @@ class RatingMlpModel(NeuralRanker):
             "learning_rate": block.learning_rate,
             "batch_size": block.batch_size,
             "max_epochs": block.max_epochs,
-            "patience": block.patience,
             "finetune_epochs": block.finetune_epochs,
             "n_users": len(catalog.user_ids),
             "n_items": len(catalog.item_ids),
