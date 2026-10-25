@@ -157,6 +157,58 @@ class EaseConfig:
 
 
 @dataclass(frozen=True)
+class TwoTowerSearch:
+    """Hiperparámetros del two-tower que Optuna recorre."""
+
+    embedding_dim: SearchRange = field(
+        default_factory=lambda: SearchRange(16, 64, log=True, integer=True)
+    )
+    learning_rate: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-3, 0.05, log=True)
+    )
+    n_negatives: SearchRange = field(
+        default_factory=lambda: SearchRange(8, 64, log=True, integer=True)
+    )
+    temperature: SearchRange = field(
+        default_factory=lambda: SearchRange(0.05, 0.5, log=True)
+    )
+
+
+@dataclass(frozen=True)
+class TwoTowerConfig:
+    """Two-tower colaborativo. Sin `--tune` se usan estos valores.
+
+    La torre de usuario proyecta el promedio de los libros leídos, pesado por
+    rating. La torre de ítem es el embedding del libro. El score es el coseno.
+    `max_epochs` es el tope; el study corta antes si el último fold no mejora.
+    """
+
+    embedding_dim: int = 32
+    learning_rate: float = 0.01
+    n_negatives: int = 16
+    temperature: float = 0.1
+    max_epochs: int = 5
+    patience: int = 2
+    batch_size: int = 2048
+    weight_decay: float = 1e-6
+    search: TwoTowerSearch = field(default_factory=TwoTowerSearch)
+
+    def __post_init__(self) -> None:
+        if self.embedding_dim < 1:
+            raise ValueError("embedding_dim debe ser positivo")
+        if self.learning_rate <= 0:
+            raise ValueError("learning_rate debe ser positivo")
+        if self.n_negatives < 1:
+            raise ValueError("n_negatives debe ser positivo")
+        if self.temperature <= 0:
+            raise ValueError("temperature debe ser positivo")
+        if self.max_epochs < 1 or self.patience < 1 or self.batch_size < 1:
+            raise ValueError("max_epochs, patience y batch_size deben ser positivos")
+        if self.weight_decay < 0:
+            raise ValueError("weight_decay no puede ser negativo")
+
+
+@dataclass(frozen=True)
 class RankerConfig:
     """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna.
 
@@ -200,6 +252,7 @@ class PipelineConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)
     ease: EaseConfig = field(default_factory=EaseConfig)
+    two_tower: TwoTowerConfig = field(default_factory=TwoTowerConfig)
 
     def as_dict(self) -> dict[str, Any]:
         """Devuelve una representación apta para JSON."""

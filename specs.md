@@ -103,6 +103,8 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 
+`two_tower` guarda `artifacts/two_tower_hyperparameters.json`. Optuna recorre la dimensión del embedding (16–64, log), el learning rate (0,001–0,05, log), la cantidad de negativos (8–64, log) y la temperatura (0,05–0,5, log). Las épocas se cortan por paciencia sobre ese mismo NDCG@20.
+
 ## Interfaz
 
 Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelibroleo/` y `main.py`.
@@ -110,21 +112,22 @@ Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelib
 ```bash
 uv run python main.py evaluate --model two_stage --note "qué se está probando"
 uv run python main.py evaluate --model ease --tune --note "EASE contra el mismo hold-out"
+uv run python main.py evaluate --model two_tower --tune --note "two-tower contra el mismo hold-out"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
 uv run python main.py export-serving
 ```
 
-`--model` elige el algoritmo (`two_stage`, `popularity` o `ease`). Train, folds de
+`--model` elige el algoritmo (`two_stage`, `popularity`, `ease` o `two_tower`). Train, folds de
 validación y test salen siempre de `split_data.py`. La entrega sigue siendo
 `submission.csv` con los lectores de `ejemplo.csv`. Un modelo nuevo solo
 implementa `fit` y `recommend`; no tiene que separar retrieval y ranking.
 `two_stage` sí lo hace, y sus columnas numéricas están en `two_stage/columns.py`.
-`ease` es un único modelo ítem-ítem.
+`ease` es un único modelo ítem-ítem. `two_tower` también es de una etapa: embedding de libro, vector de usuario y coseno.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 
-Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-modelo-comando-modo-sufijo`) queda en el tag `run_name` y el algoritmo en el tag `model`. En `artifacts/run.json` y en los diagnósticos también queda el nombre. Con `--tune`, el study de `two_stage` corre en una hija `{run_name}__pipeline` y el de `ease` en `{run_name}__ease`.
+Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-modelo-comando-modo-sufijo`) queda en el tag `run_name` y el algoritmo en el tag `model`. En `artifacts/run.json` y en los diagnósticos también queda el nombre. Con `--tune`, el study de `two_stage` corre en una hija `{run_name}__pipeline`, el de `ease` en `{run_name}__ease` y el de `two_tower` en `{run_name}__two_tower`.
 
 `export-serving` ajusta las fuentes sobre toda la historia y escribe `artifacts/serving.joblib`. La API (`serving/app.py`) carga ese artefacto una vez y, por lector, solo rankea. Las valoraciones de la demo viven en el navegador y no se escriben en `data.db`.
 

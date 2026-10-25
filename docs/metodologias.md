@@ -211,3 +211,32 @@ El study maximiza el NDCG@20 del último fold rolling y escribe
 `tuned_hyperparameters.json`. Sin `--tune`, la corrida siguiente reutiliza ese
 archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
 incluye, y `ease_selected.*` guarda el trío elegido.
+
+## Two-tower
+
+`TwoTowerModel` (`src/quelibroleo/two_tower.py`), modelo `two_tower`. Es otro
+recomendador de una etapa, con el mismo corte y el mismo NDCG@20. Se elige con
+`--model two_tower`.
+
+Hay dos torres. La de ítem es un embedding por libro. La de usuario toma el
+promedio de esos embeddings sobre los libros leídos, pesado por rating, lo
+proyecta con una matriz lineal y normaliza. Al entrenar, el libro que se
+predice no entra en el promedio. El score es el coseno. Los negativos son
+libros al azar y la pérdida es un softmax. Quien no tiene historia, o no llega
+a 20 libros, completa con popularidad.
+
+Optuna recorre cuatro hiperparámetros. Las épocas no: hay un tope
+(`max_epochs`, defecto 5) y el último fold corta si el NDCG@20 no mejora
+durante `patience` épocas (defecto 2).
+
+| Parámetro | Valores | Qué cambia |
+| --- | --- | --- |
+| `embedding_dim` | 16–64, log. Defecto 32 | Tamaño de las dos torres |
+| `learning_rate` | 0,001–0,05, log. Defecto 0,01 | Paso de AdamW |
+| `n_negatives` | 8–64, log. Defecto 16 | Negativos aleatorios por lectura |
+| `temperature` | 0,05–0,5, log. Defecto 0,1 | Qué tan marcado es el softmax |
+
+El estudio escribe `artifacts/two_tower_hyperparameters.json`. No lee ni
+reemplaza `tuned_hyperparameters.json` ni `ease_hyperparameters.json`. En
+MLflow el tag `model` vale `two_tower` y `two_tower_selected.*` guarda lo
+elegido, incluidas las épocas con las que después se reentrena.

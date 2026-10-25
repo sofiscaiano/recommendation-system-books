@@ -11,7 +11,7 @@ from .config import PipelineConfig
 from .data import ITEM_COL, observed_catalog
 from .split_data import SplitData
 
-MODEL_NAMES = ("two_stage", "popularity", "ease")
+MODEL_NAMES = ("two_stage", "popularity", "ease", "two_tower")
 
 
 class Recommender(Protocol):
@@ -70,5 +70,9 @@ def build_model(name: str, config: PipelineConfig) -> Recommender:
         from .ease import EaseModel
 
         return EaseModel(config)
+    if name == "two_tower":
+        from .two_tower import TwoTowerModel
+
+        return TwoTowerModel(config)
     known = ", ".join(MODEL_NAMES)
     raise ValueError(f"Modelo desconocido: {name}. Opciones: {known}")

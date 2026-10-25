@@ -36,6 +36,7 @@ _MODEL_ARTIFACTS = {
         "feature_importance.csv",
     ),
     "ease": ("ease_hyperparameters.json",),
+    "two_tower": ("two_tower_hyperparameters.json",),
 }
 _current_run_name: ContextVar[str] = ContextVar("current_run_name", default="")
 
@@ -66,6 +67,10 @@ def _reuses_saved_file(config: PipelineConfig) -> bool:
         from .ease import has_saved_ease_hyperparameters
 
         return has_saved_ease_hyperparameters(config.artifacts_dir)
+    if config.model == "two_tower":
+        from .two_tower import has_saved_two_tower_hyperparameters
+
+        return has_saved_two_tower_hyperparameters(config.artifacts_dir)
     return has_saved_hyperparameters(config.artifacts_dir)
 
 

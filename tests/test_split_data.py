@@ -41,7 +41,9 @@ def test_build_model_exposes_the_same_names() -> None:
     assert isinstance(build_model("popularity", config), PopularityModel)
     assert build_model("two_stage", config).name == "two_stage"
     assert build_model("ease", config).name == "ease"
+    assert build_model("two_tower", config).name == "two_tower"
     assert "two_stage" in MODEL_NAMES
     assert "ease" in MODEL_NAMES
+    assert "two_tower" in MODEL_NAMES
     with pytest.raises(ValueError, match="desconocido"):
         build_model("otro", config)
