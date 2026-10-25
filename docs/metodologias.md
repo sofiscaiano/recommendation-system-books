@@ -181,3 +181,33 @@ No se codifican texto libre ni identificadores categóricos de alta cardinalidad
 dentro del booster: autor y género entran solo a través de estos agregados
 numéricos. La editorial queda en el texto de TF-IDF. Valores infinitos se
 pasan a NaN; LightGBM los trata como faltantes.
+
+## EASE
+
+`EaseModel` (`src/quelibroleo/ease.py`), modelo `ease`. Es un recomendador de
+una etapa: no arma candidatos ni llama a LambdaRank. Se elige con
+`--model ease` y usa el mismo corte, el mismo top-20 y el mismo NDCG@20.
+
+Aprende una matriz ítem-ítem **B** que reconstruye la fila del lector,
+`x̂ = x B`, con la diagonal en cero (Steck, WWW 2019). La solución es cerrada:
+se diagonaliza `XᵀX` una vez y cada `λ` solo reescala los autovalores. En
+inferencia se enmascaran los libros ya leídos. Si el lector no tiene lecturas
+entre los libros del modelo, el ranking es el de popularidad; si EASE no
+completa 20, popularidad rellena el resto.
+
+Tres hiperparámetros, los únicos que toca su study:
+
+| Parámetro | Valores | Qué cambia |
+| --- | --- | --- |
+| `reg_lambda` | 1–100.000, log. Defecto 500 | Penalización L2 de **B** |
+| `min_interactions` | 10–100, log. Defecto 20 | Libros que entran a la matriz. Por debajo de 10 el catálogo pasa de unos 12.000 y la Gram densa no entra cómoda |
+| `weight_mode` | `binary`, `rating`, `confidence` | Unos, el rating 1–10, o `(1 + rating / 10)` por la misma recencia que ALS |
+
+`confidence` usa `recency_half_life_days` de la config de retrieval (365). Ese
+valor no se busca. `--label-gain` sigue siendo solo de LambdaRank.
+
+El study maximiza el NDCG@20 del último fold rolling y escribe
+`artifacts/ease_hyperparameters.json`. No lee ni reemplaza
+`tuned_hyperparameters.json`. Sin `--tune`, la corrida siguiente reutiliza ese
+archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
+incluye, y `ease_selected.*` guarda el trío elegido.

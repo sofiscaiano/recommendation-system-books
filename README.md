@@ -48,14 +48,16 @@ cualquier modelo. `submit` reentrena con toda la historia y escribe el mismo
 ```bash
 uv run python main.py evaluate --model two_stage --note "pipeline actual"
 uv run python main.py evaluate --model popularity --note "baseline"
+uv run python main.py evaluate --model ease --note "EASE como modelo único"
 ```
 
 Un modelo nuevo implementa `fit(split)` y `recommend(users)` y se registra
 en `build_model` (`src/quelibroleo/models.py`). Puede ser un solo modelo:
 no tiene que buscar candidatos y después ordenarlos. `split.history` es el
 train, `split.test` el hold-out y `validation_folds` los cortes internos;
-el último fold es la validación. `two_stage`, el modelo actual, sí separa
-esas etapas. La tabla numérica con la que su LambdaRank ordena está en
+el último fold es la validación. `two_stage` separa retrieval y ranking.
+`ease` puntúa el catálogo con una matriz ítem-ítem y devuelve el top-20.
+La tabla numérica con la que LambdaRank ordena está en
 `two_stage/columns.py` y no la usa un modelo único.
 
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
@@ -66,9 +68,10 @@ uv run python main.py evaluate --tune --note "búsqueda de hiperparámetros"
 uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
 
-`evaluate --tune` escribe `artifacts/tuned_hyperparameters.json`. Las corridas
-siguientes de `evaluate` y `submit` sin `--tune` entrenan con ese archivo. Si
-no existe, usan los hiperparámetros fijos.
+`evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
+El de `ease` escribe `artifacts/ease_hyperparameters.json`. Cada modelo
+reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro. Si
+el archivo de ese modelo no existe, usa los hiperparámetros fijos.
 
 `--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra
@@ -83,8 +86,9 @@ uv run python main.py evaluate --tune --label-gain exponential --note "label_gai
 
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
-único (`fecha-comando-modo-sufijo`). El modo es `tune` si busca, `tuned` si
-reutiliza el archivo guardado y `fixed` si usa los valores por defecto. Ese
+único (`fecha-modelo-comando-modo-sufijo`). El tag `model` es el algoritmo
+(`two_stage`, `popularity` o `ease`). El modo es `tune` si busca, `tuned` si
+reutiliza el archivo de ese modelo y `fixed` si usa los valores por defecto. Ese
 nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
 cambia de columnas. Cada `submit` copia esa entrega a `submissions/{run_name}/`

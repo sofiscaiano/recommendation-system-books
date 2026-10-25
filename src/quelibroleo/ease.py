@@ -1,0 +1,617 @@
+"""EASE: un solo modelo ítem-ítem, sin retrieval ni LambdaRank.
+
+La solución es la de Steck (WWW 2019). Con la matriz de interacciones X
+(lectores × libros) se aprende B tal que la predicción es X B, la diagonal
+de B es cero y el ajuste es error cuadrático más una penalización L2.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from scipy import sparse
+
+from .baselines import PopularityRecommender
+from .config import EASE_WEIGHT_MODES, EaseConfig, PipelineConfig
+from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, observed_catalog
+from .metrics import ndcg_at_k
+from .split_data import SplitData, validation_folds
+
+LOGGER = logging.getLogger(__name__)
+EASE_HYPERPARAMETERS_FILE = "ease_hyperparameters.json"
+TOP_K = 20
+# Por debajo de 10 lecturas el catálogo pasa de ~12.000 libros y la Gram
+# densa deja de entrar cómoda en memoria. La búsqueda no baja de 10.
+MAX_ITEMS = 12_000
+_SCORE_BATCH = 512
+
+
+@dataclass(frozen=True)
+class EaseParameters:
+    """Los tres hiperparámetros con los que se ajusta la matriz."""
+
+    reg_lambda: float
+    min_interactions: int
+    weight_mode: str
+    run_name: str = ""
+
+
+@dataclass(frozen=True)
+class EaseSpectrum:
+    """Autovalores de XᵀX. Alcanza para puntuar cualquier λ sin rearma B."""
+
+    item_ids: np.ndarray
+    eigenvalues: np.ndarray
+    eigenvectors: np.ndarray
+
+
+def ease_hyperparameters_path(artifacts_dir: Path) -> Path:
+    """Ruta del tuneo de EASE. No es el JSON de two_stage."""
+
+    return Path(artifacts_dir) / EASE_HYPERPARAMETERS_FILE
+
+
+def has_saved_ease_hyperparameters(artifacts_dir: Path) -> bool:
+    """Indica si hay un tuneo de EASE para reutilizar."""
+
+    return ease_hyperparameters_path(artifacts_dir).is_file()
+
+
+def load_ease_hyperparameters(path: Path) -> EaseParameters:
+    """Lee el JSON de EASE. Falla si el archivo existe pero no es válido."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise TypeError("el archivo no es un objeto")
+        reg_lambda = float(payload["reg_lambda"])
+        min_interactions = int(payload["min_interactions"])
+        weight_mode = payload["weight_mode"]
+        run_name = payload.get("run_name", "")
+        if not isinstance(weight_mode, str) or weight_mode not in EASE_WEIGHT_MODES:
+            raise ValueError("weight_mode desconocido")
+        if not isinstance(run_name, str):
+            raise TypeError("run_name debe ser texto")
+        if reg_lambda <= 0 or min_interactions < 1:
+            raise ValueError("reg_lambda y min_interactions deben ser positivos")
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Hiperparámetros de EASE inválidos en {path}") from exc
+    return EaseParameters(
+        reg_lambda=reg_lambda,
+        min_interactions=min_interactions,
+        weight_mode=weight_mode,
+        run_name=run_name,
+    )
+
+
+def parameters_from_config(config: EaseConfig) -> EaseParameters:
+    """Valores fijos, los de una corrida sin archivo guardado."""
+
+    return EaseParameters(
+        reg_lambda=float(config.reg_lambda),
+        min_interactions=int(config.min_interactions),
+        weight_mode=config.weight_mode,
+    )
+
+
+def resolve_ease_parameters(config: PipelineConfig) -> tuple[EaseParameters, str]:
+    """Devuelve el tuneo de EASE, o los valores fijos si ese archivo no existe."""
+
+    path = ease_hyperparameters_path(config.artifacts_dir)
+    if path.is_file():
+        loaded = load_ease_hyperparameters(path)
+        LOGGER.info(
+            "Reusando EASE de %s (corrida %s, λ=%s, mínimo=%s, peso=%s)",
+            path,
+            loaded.run_name or "sin nombre",
+            loaded.reg_lambda,
+            loaded.min_interactions,
+            loaded.weight_mode,
+        )
+        return loaded, "saved"
+    LOGGER.info("Sin %s; EASE usa los hiperparámetros fijos", path)
+    return parameters_from_config(config.ease), "default"
+
+
+def _row_weights(
+    frame: pd.DataFrame,
+    weight_mode: str,
+    half_life_days: float,
+) -> np.ndarray:
+    """Peso de cada lectura. La recencia usa el último evento del lector."""
+
+    if weight_mode == "binary":
+        return np.ones(len(frame), dtype=np.float64)
+    rating = frame[RATING_COL].to_numpy(dtype=np.float64)
+    if weight_mode == "rating":
+        return rating
+    if half_life_days <= 0:
+        recency = np.ones(len(frame), dtype=np.float64)
+    else:
+        max_dates = frame.groupby(USER_COL, sort=False)[DATE_COL].transform("max")
+        age_days = (max_dates - frame[DATE_COL]).dt.days.clip(lower=0).to_numpy()
+        recency = np.exp2(-age_days / half_life_days)
+    return (1.0 + rating / 10.0) * recency
+
+
+def interaction_matrix(
+    frame: pd.DataFrame,
+    *,
+    min_interactions: int,
+    weight_mode: str,
+    half_life_days: float,
+) -> tuple[sparse.csr_matrix, np.ndarray]:
+    """Matriz lectores × libros frecuentes. Los pesos salen del historial completo."""
+
+    if weight_mode not in EASE_WEIGHT_MODES:
+        known = ", ".join(EASE_WEIGHT_MODES)
+        raise ValueError(f"weight_mode debe ser uno de: {known}")
+    counts = frame.groupby(ITEM_COL, sort=False).size()
+    item_ids = np.array(
+        sorted(counts[counts >= min_interactions].index.astype(str)),
+        dtype=object,
+    )
+    if len(item_ids) > MAX_ITEMS:
+        raise ValueError(
+            f"EASE armaría una matriz densa de {len(item_ids)} libros. "
+            f"Subí min_interactions (ahora {min_interactions}); el tope es {MAX_ITEMS}."
+        )
+    if len(item_ids) == 0:
+        empty = sparse.csr_matrix((0, 0), dtype=np.float64)
+        return empty, item_ids
+    item_index = {item: index for index, item in enumerate(item_ids)}
+    columns = np.fromiter(
+        (item_index.get(item, -1) for item in frame[ITEM_COL].astype(str)),
+        dtype=np.int64,
+        count=len(frame),
+    )
+    mask = columns >= 0
+    users = np.array(
+        sorted(frame.loc[mask, USER_COL].astype(str).unique()),
+        dtype=object,
+    )
+    user_index = {user: index for index, user in enumerate(users)}
+    rows = frame.loc[mask, USER_COL].astype(str).map(user_index).to_numpy()
+    weights = _row_weights(frame, weight_mode, half_life_days)[mask]
+    matrix = sparse.csr_matrix(
+        (weights, (rows, columns[mask])),
+        shape=(len(users), len(item_ids)),
+        dtype=np.float64,
+    )
+    return matrix, item_ids
+
+
+def spectrum_from_matrix(
+    matrix: sparse.csr_matrix,
+    item_ids: np.ndarray,
+) -> EaseSpectrum:
+    """Diagonaliza XᵀX. λ se aplica después, así varios trials comparten esto."""
+
+    if matrix.shape[1] == 0:
+        return EaseSpectrum(
+            item_ids=item_ids,
+            eigenvalues=np.zeros(0, dtype=np.float64),
+            eigenvectors=np.zeros((0, 0), dtype=np.float64),
+        )
+    gram = (matrix.T @ matrix).toarray()
+    gram = (gram + gram.T) * 0.5
+    eigenvalues, eigenvectors = np.linalg.eigh(gram)
+    np.maximum(eigenvalues, 0.0, out=eigenvalues)
+    return EaseSpectrum(
+        item_ids=item_ids,
+        eigenvalues=eigenvalues,
+        eigenvectors=eigenvectors,
+    )
+
+
+def score_users(matrix: sparse.csr_matrix, spectrum: EaseSpectrum, reg_lambda: float) -> np.ndarray:
+    """Puntúa filas de X. s = x − (x P) / diag(P), con P = (XᵀX + λI)⁻¹."""
+
+    n_users, n_items = matrix.shape
+    if n_items == 0 or n_users == 0:
+        return np.zeros((n_users, n_items), dtype=np.float64)
+    if reg_lambda <= 0:
+        raise ValueError("reg_lambda debe ser positivo")
+    inverse = 1.0 / (spectrum.eigenvalues + reg_lambda)
+    diagonal = np.square(spectrum.eigenvectors) @ inverse
+    projected = matrix @ spectrum.eigenvectors
+    reconstructed = (projected * inverse) @ spectrum.eigenvectors.T
+    return matrix.toarray() - reconstructed / diagonal
+
+
+def _matrix_for_users(
+    frame: pd.DataFrame,
+    users: list[str],
+    item_ids: np.ndarray,
+    *,
+    weight_mode: str,
+    half_life_days: float,
+) -> sparse.csr_matrix:
+    """Una fila por lector, en ese orden, restringida a los libros del modelo."""
+
+    item_index = {item: index for index, item in enumerate(item_ids)}
+    if not item_index:
+        return sparse.csr_matrix((len(users), 0), dtype=np.float64)
+    user_index = {user: index for index, user in enumerate(users)}
+    columns = frame[ITEM_COL].astype(str).map(item_index)
+    rows = frame[USER_COL].astype(str).map(user_index)
+    mask = columns.notna() & rows.notna()
+    weights = _row_weights(frame, weight_mode, half_life_days)
+    return sparse.csr_matrix(
+        (
+            weights[mask.to_numpy()],
+            (rows[mask].to_numpy(dtype=np.int64), columns[mask].to_numpy(dtype=np.int64)),
+        ),
+        shape=(len(users), len(item_ids)),
+        dtype=np.float64,
+    )
+
+
+def _top_unseen(
+    item_ids: np.ndarray,
+    scores: np.ndarray,
+    seen: set[str],
+    n: int,
+) -> list[tuple[str, float]]:
+    """Top-n con desempate por id_libro. Los ya leídos quedan afuera."""
+
+    if n <= 0 or len(item_ids) == 0:
+        return []
+    ranked_scores = scores.copy()
+    for index, item in enumerate(item_ids):
+        if item in seen:
+            ranked_scores[index] = -np.inf
+    order = np.lexsort((item_ids, -ranked_scores))
+    chosen: list[tuple[str, float]] = []
+    for index in order:
+        if not np.isfinite(ranked_scores[index]):
+            continue
+        chosen.append((str(item_ids[index]), float(ranked_scores[index])))
+        if len(chosen) == n:
+            break
+    return chosen
+
+
+class _SpectrumCache:
+    """Guarda la última diagonalización. λ no la invalida; el peso y el corte sí."""
+
+    def __init__(self) -> None:
+        self._key: tuple[Any, ...] | None = None
+        self.spectrum: EaseSpectrum | None = None
+
+    def get(
+        self,
+        frame: pd.DataFrame,
+        *,
+        min_interactions: int,
+        weight_mode: str,
+        half_life_days: float,
+    ) -> EaseSpectrum:
+        key = (id(frame), min_interactions, weight_mode, half_life_days)
+        if key == self._key and self.spectrum is not None:
+            return self.spectrum
+        matrix, item_ids = interaction_matrix(
+            frame,
+            min_interactions=min_interactions,
+            weight_mode=weight_mode,
+            half_life_days=half_life_days,
+        )
+        LOGGER.info(
+            "EASE factoriza %s libros (%s, mínimo %s)",
+            len(item_ids),
+            weight_mode,
+            min_interactions,
+        )
+        spectrum = spectrum_from_matrix(matrix, item_ids)
+        self._key = key
+        self.spectrum = spectrum
+        return spectrum
+
+
+def _recommend_frame(
+    history: pd.DataFrame,
+    users: list[str],
+    spectrum: EaseSpectrum,
+    parameters: EaseParameters,
+    popularity: PopularityRecommender,
+    *,
+    half_life_days: float,
+    n: int,
+) -> pd.DataFrame:
+    """Top-n de EASE y, si no alcanza, popularidad sin repetir ni recomendar leídos."""
+
+    if not users:
+        return pd.DataFrame(columns=[USER_COL, ITEM_COL, "score", "rank"])
+    unique = list(dict.fromkeys(users))
+    matrix = _matrix_for_users(
+        history,
+        unique,
+        spectrum.item_ids,
+        weight_mode=parameters.weight_mode,
+        half_life_days=half_life_days,
+    )
+    scored = np.zeros((len(unique), len(spectrum.item_ids)), dtype=np.float64)
+    for start in range(0, len(unique), _SCORE_BATCH):
+        stop = start + _SCORE_BATCH
+        scored[start:stop] = score_users(
+            matrix[start:stop],
+            spectrum,
+            parameters.reg_lambda,
+        )
+    totals = np.asarray(matrix.sum(axis=1)).ravel()
+    by_user = {
+        user: (row, total > 0)
+        for user, row, total in zip(unique, scored, totals, strict=True)
+    }
+    seen = history.groupby(USER_COL, sort=False)[ITEM_COL].agg(set).to_dict()
+    fallback = popularity.recommend(unique, history, n=n)
+    if fallback.empty:
+        fallback_by_user: dict[str, list[str]] = {}
+    else:
+        fallback_by_user = fallback.groupby(USER_COL)[ITEM_COL].agg(list).to_dict()
+    rows: list[dict[str, object]] = []
+    for user in users:
+        row, has_history = by_user[user]
+        chosen: list[tuple[str, float]] = []
+        if has_history:
+            chosen = _top_unseen(
+                spectrum.item_ids,
+                row,
+                set(seen.get(user, set())),
+                n,
+            )
+        already = {item for item, _ in chosen}
+        for item in fallback_by_user.get(user, []):
+            if len(chosen) >= n:
+                break
+            if item in already or item in seen.get(user, set()):
+                continue
+            chosen.append((item, float("nan")))
+            already.add(item)
+        for rank, (item, score) in enumerate(chosen, start=1):
+            rows.append(
+                {
+                    USER_COL: user,
+                    ITEM_COL: item,
+                    "score": score,
+                    "rank": rank,
+                }
+            )
+    return pd.DataFrame.from_records(
+        rows,
+        columns=[USER_COL, ITEM_COL, "score", "rank"],
+    )
+
+
+def _in_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
+    """Deja solo libros del catálogo. El corte temporal no los saca."""
+
+    catalog = set(books[ITEM_COL].astype(str))
+    kept = frame[frame[ITEM_COL].astype(str).isin(catalog)].copy()
+    kept[USER_COL] = kept[USER_COL].astype(str)
+    kept[ITEM_COL] = kept[ITEM_COL].astype(str)
+    return kept
+
+
+def tune_ease(
+    history: pd.DataFrame,
+    books: pd.DataFrame,
+    config: PipelineConfig,
+) -> EaseParameters:
+    """Elige λ, el mínimo de lecturas y el peso maximizando el NDCG@20 del último fold."""
+
+    try:
+        import optuna
+    except ImportError as exc:
+        raise ImportError("El tuning de EASE requiere `optuna`") from exc
+
+    folds = validation_folds(history, config)
+    if len(folds) < 2:
+        raise ValueError("Se requieren al menos dos folds para el study de EASE")
+    train = _in_catalog(folds[-1].train, books)
+    target = folds[-1].target
+    query_users = list(folds[-1].query_users)
+    half_life = config.retrieval.recency_half_life_days
+    cache = _SpectrumCache()
+    search = config.ease.search
+
+    def objective(trial: Any) -> float:
+        """NDCG@20 del último fold. La diagonalización se reusa si solo cambia λ."""
+
+        reg_lambda = float(search.reg_lambda.suggest(trial, "reg_lambda"))
+        min_interactions = int(search.min_interactions.suggest(trial, "min_interactions"))
+        weight_mode = str(trial.suggest_categorical("weight_mode", list(EASE_WEIGHT_MODES)))
+        spectrum = cache.get(
+            train,
+            min_interactions=min_interactions,
+            weight_mode=weight_mode,
+            half_life_days=half_life,
+        )
+        parameters = EaseParameters(reg_lambda, min_interactions, weight_mode)
+        popularity = PopularityRecommender().fit(
+            train,
+            set(train[ITEM_COL].astype(str)),
+        )
+        recommendations = _recommend_frame(
+            train,
+            query_users,
+            spectrum,
+            parameters,
+            popularity,
+            half_life_days=half_life,
+            n=TOP_K,
+        )
+        score = ndcg_at_k(recommendations, target, k=TOP_K)
+        LOGGER.info(
+            "EASE trial %s: λ=%.4g mínimo=%s peso=%s ndcg=%.4f",
+            trial.number,
+            reg_lambda,
+            min_interactions,
+            weight_mode,
+            score,
+        )
+        return score
+
+    from .tracking import log_optuna_plots, optuna_callback, study_name, track_study
+
+    stage = "ease"
+    sampler = optuna.samplers.TPESampler(seed=config.random_seed)
+    study = optuna.create_study(
+        study_name=study_name(stage),
+        direction="maximize",
+        sampler=sampler,
+    )
+    with track_study(stage):
+        import mlflow
+
+        if mlflow.active_run() is not None:
+            mlflow.set_tag("model", "ease")
+        study.optimize(
+            objective,
+            n_trials=config.optuna_trials,
+            callbacks=[optuna_callback(stage)],
+            show_progress_bar=True,
+        )
+        log_optuna_plots(study, stage)
+
+    best = study.best_trial
+    from .tracking import active_run_name
+
+    return EaseParameters(
+        reg_lambda=float(best.params["reg_lambda"]),
+        min_interactions=int(best.params["min_interactions"]),
+        weight_mode=str(best.params["weight_mode"]),
+        run_name=active_run_name(),
+    )
+
+
+def _write_ease_hyperparameters(config: PipelineConfig, parameters: EaseParameters) -> None:
+    """Guarda el study de EASE sin tocar el JSON de two_stage."""
+
+    path = ease_hyperparameters_path(config.artifacts_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    from .tracking import with_run_name
+
+    path.write_text(
+        json.dumps(
+            with_run_name(
+                {
+                    "reg_lambda": parameters.reg_lambda,
+                    "min_interactions": parameters.min_interactions,
+                    "weight_mode": parameters.weight_mode,
+                }
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    LOGGER.info("Hiperparámetros de EASE guardados en %s", path)
+
+
+def _log_selected(parameters: EaseParameters, n_items: int, origin: str) -> None:
+    """Deja en la corrida activa qué EASE se usó, aparte de los valores de búsqueda."""
+
+    import mlflow
+
+    if mlflow.active_run() is None:
+        return
+    mlflow.log_params(
+        {
+            "ease_selected.reg_lambda": parameters.reg_lambda,
+            "ease_selected.min_interactions": parameters.min_interactions,
+            "ease_selected.weight_mode": parameters.weight_mode,
+            "ease_selected.origin": origin,
+            "ease_selected.n_items": n_items,
+        }
+    )
+    mlflow.log_metric("ease_items", float(n_items))
+
+
+class EaseModel:
+    """Recomendador de una etapa. `fit` y `recommend` no pasan por two_stage."""
+
+    name = "ease"
+
+    def __init__(self, config: PipelineConfig) -> None:
+        self.config = config
+        self.hyperparameters_origin = "default"
+        self.hyperparameters_run_name = ""
+        self.hyperparameters: dict[str, Any] = {"model": self.name}
+        self._history: pd.DataFrame | None = None
+        self._spectrum: EaseSpectrum | None = None
+        self._parameters: EaseParameters | None = None
+        self._popularity: PopularityRecommender | None = None
+
+    def fit(self, split: SplitData, *, tune: bool = False) -> None:
+        """Ajusta B con `split.history`. El último fold solo entra si `tune` es verdadero."""
+
+        raw = split.history.copy()
+        raw[USER_COL] = raw[USER_COL].astype(str)
+        raw[ITEM_COL] = raw[ITEM_COL].astype(str)
+        if tune:
+            parameters = tune_ease(raw, split.books, self.config)
+            self.hyperparameters_origin = "tune"
+            self.hyperparameters_run_name = parameters.run_name
+            _write_ease_hyperparameters(self.config, parameters)
+        else:
+            parameters, origin = resolve_ease_parameters(self.config)
+            self.hyperparameters_origin = origin
+            self.hyperparameters_run_name = parameters.run_name if origin == "saved" else ""
+        history = _in_catalog(raw, split.books)
+        half_life = self.config.retrieval.recency_half_life_days
+        matrix, item_ids = interaction_matrix(
+            history,
+            min_interactions=parameters.min_interactions,
+            weight_mode=parameters.weight_mode,
+            half_life_days=half_life,
+        )
+        LOGGER.info(
+            "EASE entrena %s libros (λ=%s, mínimo=%s, peso=%s)",
+            len(item_ids),
+            parameters.reg_lambda,
+            parameters.min_interactions,
+            parameters.weight_mode,
+        )
+        books = split.books.copy()
+        books[ITEM_COL] = books[ITEM_COL].astype(str)
+        catalog = set(observed_catalog(history, books)[ITEM_COL].astype(str))
+        self._history = history
+        self._spectrum = spectrum_from_matrix(matrix, item_ids)
+        self._parameters = parameters
+        self._popularity = PopularityRecommender().fit(history, catalog)
+        self.hyperparameters = {
+            "model": self.name,
+            "reg_lambda": parameters.reg_lambda,
+            "min_interactions": parameters.min_interactions,
+            "weight_mode": parameters.weight_mode,
+            "n_items": len(item_ids),
+        }
+        _log_selected(parameters, len(item_ids), self.hyperparameters_origin)
+
+    def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
+        """Top-20, sin libros ya leídos. Popularidad completa si EASE no llega."""
+
+        if (
+            self._history is None
+            or self._spectrum is None
+            or self._parameters is None
+            or self._popularity is None
+        ):
+            raise RuntimeError("El modelo debe entrenarse antes de recomendar")
+        return _recommend_frame(
+            self._history,
+            [str(user) for user in users],
+            self._spectrum,
+            self._parameters,
+            self._popularity,
+            half_life_days=self.config.retrieval.recency_half_life_days,
+            n=TOP_K,
+        )

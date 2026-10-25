@@ -58,7 +58,8 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
     assert stored.data.tags["git_commit"]
     assert stored.data.tags["git_dirty"] in {"true", "false"}
     assert stored.info.run_name == stored.data.tags["run_name"]
-    assert "-evaluate-fixed-" in stored.info.run_name
+    assert stored.data.tags["model"] == "two_stage"
+    assert "-two_stage-evaluate-fixed-" in stored.info.run_name
 
 
 def test_run_name_marks_reused_hyperparameters(tmp_path, monkeypatch) -> None:
@@ -74,7 +75,7 @@ def test_run_name_marks_reused_hyperparameters(tmp_path, monkeypatch) -> None:
     ):
         run_name = mlflow.active_run().info.run_name
 
-    assert "-submit-tuned-" in run_name
+    assert "-two_stage-submit-tuned-" in run_name
 
 
 def test_archive_submission_keeps_each_copy(tmp_path, monkeypatch) -> None:
@@ -190,3 +191,53 @@ def test_optuna_study_is_one_child_run(tmp_path, monkeypatch) -> None:
     assert nested[0].data.tags["mlflow.parentRunId"] == parent
     history = client.get_metric_history(nested[0].info.run_id, "objective")
     assert [(point.step, point.value) for point in history] == [(0, 0.2), (1, 0.42)]
+
+
+def test_saved_hyperparameters_are_per_model(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    ease_file = artifacts / "ease_hyperparameters.json"
+    two_stage_file = artifacts / "tuned_hyperparameters.json"
+    ease_file.write_text("{}\n", encoding="utf-8")
+
+    with track_command(
+        "evaluate",
+        PipelineConfig(
+            model="two_stage",
+            run_note="two stage sin su archivo",
+            artifacts_dir=artifacts,
+        ),
+        tune=False,
+    ):
+        two_stage_fixed = mlflow.active_run().info.run_name
+
+    two_stage_file.write_text("{}\n", encoding="utf-8")
+    ease_file.unlink()
+    with track_command(
+        "evaluate",
+        PipelineConfig(
+            model="ease",
+            run_note="ease sin su archivo",
+            artifacts_dir=artifacts,
+        ),
+        tune=False,
+    ):
+        ease_fixed = mlflow.active_run().info.run_name
+        ease_fixed_id = mlflow.active_run().info.run_id
+
+    ease_file.write_text("{}\n", encoding="utf-8")
+    with track_command(
+        "evaluate",
+        PipelineConfig(model="ease", run_note="ease con su archivo", artifacts_dir=artifacts),
+        tune=False,
+    ):
+        ease_tuned = mlflow.active_run().info.run_name
+        ease_tuned_id = mlflow.active_run().info.run_id
+
+    client = mlflow.tracking.MlflowClient()
+    assert "-two_stage-evaluate-fixed-" in two_stage_fixed
+    assert "-ease-evaluate-fixed-" in ease_fixed
+    assert client.get_run(ease_fixed_id).data.tags["model"] == "ease"
+    assert "-ease-evaluate-tuned-" in ease_tuned
+    assert client.get_run(ease_tuned_id).data.tags["model"] == "ease"

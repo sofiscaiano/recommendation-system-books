@@ -95,11 +95,13 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 | Modo | Cuándo | Qué entrena |
 | --- | --- | --- |
-| `fixed` | No existe `artifacts/tuned_hyperparameters.json` | Valores de `PipelineConfig` |
+| `fixed` | No existe el JSON de ese modelo | Valores de `PipelineConfig` |
 | `tuned` | Existe ese archivo y no se pasa `--tune` | El JSON guardado |
-| `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que reemplaza el JSON |
+| `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que reemplaza el JSON de ese modelo |
 
-Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
+`two_stage` guarda `artifacts/tuned_hyperparameters.json`. Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
+
+`ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 
 ## Interfaz
 
@@ -107,20 +109,22 @@ Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelib
 
 ```bash
 uv run python main.py evaluate --model two_stage --note "qué se está probando"
+uv run python main.py evaluate --model ease --tune --note "EASE contra el mismo hold-out"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
 uv run python main.py export-serving
 ```
 
-`--model` elige el algoritmo (`two_stage` o `popularity`). Train, folds de
+`--model` elige el algoritmo (`two_stage`, `popularity` o `ease`). Train, folds de
 validación y test salen siempre de `split_data.py`. La entrega sigue siendo
 `submission.csv` con los lectores de `ejemplo.csv`. Un modelo nuevo solo
 implementa `fit` y `recommend`; no tiene que separar retrieval y ranking.
 `two_stage` sí lo hace, y sus columnas numéricas están en `two_stage/columns.py`.
+`ease` es un único modelo ítem-ítem.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 
-Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-comando-modo-sufijo`) queda en el tag `run_name`, en `artifacts/run.json` y en los diagnósticos. Con `--tune`, el study corre en una hija `{run_name}__pipeline`.
+Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-modelo-comando-modo-sufijo`) queda en el tag `run_name` y el algoritmo en el tag `model`. En `artifacts/run.json` y en los diagnósticos también queda el nombre. Con `--tune`, el study de `two_stage` corre en una hija `{run_name}__pipeline` y el de `ease` en `{run_name}__ease`.
 
 `export-serving` ajusta las fuentes sobre toda la historia y escribe `artifacts/serving.joblib`. La API (`serving/app.py`) carga ese artefacto una vez y, por lector, solo rankea. Las valoraciones de la demo viven en el navegador y no se escriben en `data.db`.
 

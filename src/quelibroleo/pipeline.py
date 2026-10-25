@@ -37,6 +37,29 @@ from .two_stage.retrieval import (
 
 LOGGER = logging.getLogger(__name__)
 
+_TWO_STAGE_DIAGNOSTICS = (
+    "retrieval_folds.csv",
+    "feature_ablations.csv",
+    "feature_importance.csv",
+    "evaluated_pipeline.joblib",
+    "final_pipeline.joblib",
+)
+
+
+def clear_foreign_diagnostics(artifacts: Path, model: str) -> None:
+    """Quita diagnósticos de two_stage cuando corre otro modelo.
+
+    No borra ``tuned_hyperparameters.json``: two_stage lo vuelve a usar.
+    """
+
+    if model == "two_stage":
+        return
+    directory = Path(artifacts)
+    for name in _TWO_STAGE_DIAGNOSTICS:
+        path = directory / name
+        if path.is_file():
+            path.unlink()
+
 
 @dataclass(frozen=True)
 class FoldMaterial:
@@ -408,7 +431,7 @@ def evaluate(
         report, trained = _evaluate(config, tune=tune, save_artifacts=save_artifacts)
         log_evaluation(report)
         if save_artifacts:
-            log_summary_artifacts(Path(config.artifacts_dir))
+            log_summary_artifacts(Path(config.artifacts_dir), model=config.model)
         return report, trained
 
 
@@ -466,6 +489,7 @@ def _evaluate(
 
         artifacts = Path(config.artifacts_dir)
         artifacts.mkdir(parents=True, exist_ok=True)
+        clear_foreign_diagnostics(artifacts, config.model)
         write_run_marker(artifacts)
         (artifacts / "config.json").write_text(
             json.dumps(with_run_name(config.as_dict()), ensure_ascii=False, indent=2),
@@ -548,7 +572,7 @@ def train_final_and_submit(
     config = config or PipelineConfig()
     with track_command("submit", config, tune=tune):
         submission = _submit(config, tune=tune, output_path=output_path)
-        log_summary_artifacts(Path(config.artifacts_dir))
+        log_summary_artifacts(Path(config.artifacts_dir), model=config.model)
         return submission
 
 
@@ -578,15 +602,15 @@ def _submit(
         popularity,
     )
     trained = getattr(model, "trained", None)
-    origin = trained.hyperparameters_origin if isinstance(trained, TrainedPipeline) else "default"
-    tuned_run = (
-        trained.hyperparameters_run_name if isinstance(trained, TrainedPipeline) else ""
-    )
-    hyperparameters = (
-        _hyperparameters_snapshot(trained)
-        if isinstance(trained, TrainedPipeline)
-        else {"model": model.name}
-    )
+    if isinstance(trained, TrainedPipeline):
+        origin = trained.hyperparameters_origin
+        tuned_run = trained.hyperparameters_run_name
+        hyperparameters = _hyperparameters_snapshot(trained)
+    else:
+        origin = getattr(model, "hyperparameters_origin", "default")
+        tuned_run = getattr(model, "hyperparameters_run_name", "")
+        recorded = getattr(model, "hyperparameters", None)
+        hyperparameters = recorded if isinstance(recorded, dict) else {"model": model.name}
     from .tracking import archive_submission, write_run_marker
 
     destination = Path(output_path or config.output_path)
@@ -604,6 +628,7 @@ def _submit(
 
     artifacts = Path(config.artifacts_dir)
     artifacts.mkdir(parents=True, exist_ok=True)
+    clear_foreign_diagnostics(artifacts, config.model)
     write_run_marker(artifacts)
     if isinstance(trained, TrainedPipeline):
         joblib.dump(trained, artifacts / "final_pipeline.joblib")

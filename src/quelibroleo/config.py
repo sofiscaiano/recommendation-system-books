@@ -117,6 +117,43 @@ class RankerSearch:
 
 
 LABEL_GAIN_MODES = ("linear", "exponential")
+EASE_WEIGHT_MODES = ("binary", "rating", "confidence")
+
+
+@dataclass(frozen=True)
+class EaseSearch:
+    """Hiperparámetros de EASE que Optuna recorre. No los usa `two_stage`."""
+
+    reg_lambda: SearchRange = field(
+        default_factory=lambda: SearchRange(1.0, 100_000.0, log=True)
+    )
+    min_interactions: SearchRange = field(
+        default_factory=lambda: SearchRange(10, 100, log=True, integer=True)
+    )
+
+
+@dataclass(frozen=True)
+class EaseConfig:
+    """EASE como modelo único. El peso de la matriz no entra al intervalo numérico.
+
+    `binary` pone unos, `rating` el valor 1–10 y `confidence` la misma
+    confianza de ALS: `(1 + rating / 10)` por recencia. Sin `--tune` se usan
+    estos tres valores. La búsqueda escribe otro archivo que el de LambdaRank.
+    """
+
+    reg_lambda: float = 500.0
+    min_interactions: int = 20
+    weight_mode: str = "binary"
+    search: EaseSearch = field(default_factory=EaseSearch)
+
+    def __post_init__(self) -> None:
+        if self.weight_mode not in EASE_WEIGHT_MODES:
+            known = ", ".join(EASE_WEIGHT_MODES)
+            raise ValueError(f"weight_mode debe ser uno de: {known}")
+        if self.reg_lambda <= 0:
+            raise ValueError("reg_lambda debe ser positivo")
+        if self.min_interactions < 1:
+            raise ValueError("min_interactions debe ser positivo")
 
 
 @dataclass(frozen=True)
@@ -162,6 +199,7 @@ class PipelineConfig:
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)
+    ease: EaseConfig = field(default_factory=EaseConfig)
 
     def as_dict(self) -> dict[str, Any]:
         """Devuelve una representación apta para JSON."""

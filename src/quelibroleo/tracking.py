@@ -26,16 +26,27 @@ _SUMMARY_ARTIFACTS = (
     "config.json",
     "evaluation.json",
     "data_quality.json",
-    "tuned_hyperparameters.json",
-    "retrieval_folds.csv",
-    "feature_ablations.csv",
-    "feature_importance.csv",
     "run.log",
 )
+_MODEL_ARTIFACTS = {
+    "two_stage": (
+        "tuned_hyperparameters.json",
+        "retrieval_folds.csv",
+        "feature_ablations.csv",
+        "feature_importance.csv",
+    ),
+    "ease": ("ease_hyperparameters.json",),
+}
 _current_run_name: ContextVar[str] = ContextVar("current_run_name", default="")
 
 
-def new_run_name(command: str, *, tune: bool, saved: bool = False) -> str:
+def new_run_name(
+    command: str,
+    *,
+    model: str,
+    tune: bool,
+    saved: bool = False,
+) -> str:
     """Nombre único de la corrida, compartido con Optuna y las salidas."""
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -45,7 +56,17 @@ def new_run_name(command: str, *, tune: bool, saved: bool = False) -> str:
         mode = "tuned"
     else:
         mode = "fixed"
-    return f"{stamp}-{command}-{mode}-{token_hex(2)}"
+    return f"{stamp}-{model}-{command}-{mode}-{token_hex(2)}"
+
+
+def _reuses_saved_file(config: PipelineConfig) -> bool:
+    """El modo `tuned` mira el JSON del modelo de esta corrida, no el de otro."""
+
+    if config.model == "ease":
+        from .ease import has_saved_ease_hyperparameters
+
+        return has_saved_ease_hyperparameters(config.artifacts_dir)
+    return has_saved_hyperparameters(config.artifacts_dir)
 
 
 def active_run_name() -> str:
@@ -273,8 +294,9 @@ def track_command(
     head, dirty = git_state()
     run_name = new_run_name(
         command,
+        model=config.model,
         tune=tune,
-        saved=has_saved_hyperparameters(config.artifacts_dir),
+        saved=_reuses_saved_file(config),
     )
     token = _current_run_name.set(run_name)
     try:
@@ -284,6 +306,7 @@ def track_command(
             mlflow.set_tags(
                 {
                     "command": command,
+                    "model": config.model,
                     "tune": str(tune).lower(),
                     "run_name": run_name,
                     "git_commit": head,
@@ -309,14 +332,19 @@ def log_evaluation(report: EvaluationReport) -> None:
     mlflow.log_metrics(_metrics(report))
 
 
-def log_summary_artifacts(artifacts_dir: Path) -> None:
-    """Adjunta los JSON y CSV de diagnóstico, sin rankings ni modelos."""
+def log_summary_artifacts(artifacts_dir: Path, *, model: str) -> None:
+    """Adjunta los JSON y CSV de diagnóstico, sin rankings ni modelos.
+
+    Cada modelo sube su propio archivo de hiperparámetros. Una corrida de
+    EASE no se queda con el JSON ni los pliegues de two_stage, ni al revés.
+    """
 
     import mlflow
 
     if mlflow.active_run() is None:
         return
-    for name in _SUMMARY_ARTIFACTS:
+    names = _SUMMARY_ARTIFACTS + _MODEL_ARTIFACTS.get(model, ())
+    for name in names:
         path = artifacts_dir / name
         if path.is_file():
             mlflow.log_artifact(str(path))
