@@ -1,23 +1,28 @@
-"""Two-tower como modelo único, sin tocar el tuneo de two_stage ni el de EASE."""
+"""Two-tower con producto y la red única, sin Optuna."""
 
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 import pytest
+import torch
 
 from quelibroleo.config import (
     PipelineConfig,
-    SearchRange,
+    RatingMlpConfig,
     SplitConfig,
     TwoTowerConfig,
-    TwoTowerSearch,
 )
 from quelibroleo.data import DataQualityReport
 from quelibroleo.models import build_model
 from quelibroleo.split_data import SplitData
-from quelibroleo.two_tower import load_two_tower_hyperparameters
+
+
+@pytest.fixture(autouse=True)
+def _cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "quelibroleo.neural.pick_device",
+        lambda: torch.device("cpu"),
+    )
 
 
 def _frame(rows: list[tuple[str, str, str, int]]) -> pd.DataFrame:
@@ -27,11 +32,13 @@ def _frame(rows: list[tuple[str, str, str, int]]) -> pd.DataFrame:
     ).assign(fecha=lambda frame: pd.to_datetime(frame["fecha"]))
 
 
-def _split(frame: pd.DataFrame) -> SplitData:
+def _split(frame: pd.DataFrame, books: pd.DataFrame | None = None) -> SplitData:
     users = tuple(sorted(frame["id_lector"].unique()))
+    if books is None:
+        books = pd.DataFrame({"id_libro": sorted(frame["id_libro"].unique())})
     return SplitData(
         holdout=True,
-        books=pd.DataFrame({"id_libro": sorted(frame["id_libro"].unique())}),
+        books=books,
         readers=pd.DataFrame({"id_lector": list(users)}),
         history=frame,
         test=frame.iloc[0:0].copy(),
@@ -42,39 +49,48 @@ def _split(frame: pd.DataFrame) -> SplitData:
     )
 
 
-def _config(tmp_path, **overrides: object) -> PipelineConfig:
+def _config(tmp_path, model: str, **overrides: object) -> PipelineConfig:
     values = {
         "embedding_dim": 8,
         "learning_rate": 0.05,
-        "n_negatives": 4,
-        "temperature": 0.2,
-        "max_epochs": 25,
-        "patience": 5,
-        "batch_size": 32,
+        "max_epochs": 40,
+        "patience": 40,
+        "finetune_epochs": 0,
+        "batch_size": 8,
     }
     values.update(overrides)
-    return PipelineConfig(artifacts_dir=tmp_path, two_tower=TwoTowerConfig(**values))
+    if model == "rating_mlp":
+        block = RatingMlpConfig(hidden_1=8, hidden_2=4, **values)
+        return PipelineConfig(artifacts_dir=tmp_path, model=model, rating_mlp=block)
+    block = TwoTowerConfig(hidden_dim=8, output_dim=4, **values)
+    return PipelineConfig(artifacts_dir=tmp_path, model=model, two_tower=block)
 
 
-def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books(tmp_path) -> None:
-    rows = [("u1", "a", "2020-01-01", 8), ("u1", "b", "2020-01-02", 8)]
-    for index, user in enumerate(("u2", "u3", "u4"), start=3):
-        rows.append((user, "a", f"2020-02-0{index}", 8))
-        rows.append((user, "b", f"2020-03-0{index}", 8))
-    rows.append(("u5", "a", "2020-04-01", 8))
-    rows.append(("u5", "c", "2020-04-02", 8))
+def _neighbor_frame() -> pd.DataFrame:
+    rows = [("u1", "a", "2020-01-01", 9), ("u1", "b", "2020-01-02", 9)]
+    for index, user in enumerate(("u2", "u3", "u4", "u7", "u8"), start=3):
+        day = index % 9
+        rows.append((user, "a", f"2020-02-0{day}", 9))
+        rows.append((user, "b", f"2020-03-0{day}", 9))
+    rows.append(("u5", "a", "2020-04-01", 9))
+    rows.append(("u5", "c", "2020-04-02", 9))
     rows.append(("u6", "a", "2020-05-01", 9))
-    frame = _frame(rows)
-    model = build_model("two_tower", _config(tmp_path))
-    model.fit(_split(frame), tune=False)
+    return _frame(rows)
 
-    ranking = model.recommend(["u6"])
+
+@pytest.mark.parametrize("model", ["two_tower", "rating_mlp"])
+def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books(tmp_path, model: str) -> None:
+    fitted = build_model(model, _config(tmp_path, model))
+    fitted.fit(_split(_neighbor_frame()), tune=False)
+
+    ranking = fitted.recommend(["u6"])
 
     assert ranking["id_libro"].tolist()[0] == "b"
     assert "a" not in ranking["id_libro"].tolist()
 
 
-def test_reader_without_history_follows_popularity(tmp_path) -> None:
+@pytest.mark.parametrize("model", ["two_tower", "rating_mlp"])
+def test_reader_without_history_follows_popularity(tmp_path, model: str) -> None:
     frame = _frame(
         [
             ("u1", "popular", "2020-01-01", 8),
@@ -82,78 +98,93 @@ def test_reader_without_history_follows_popularity(tmp_path) -> None:
             ("u1", "rare", "2020-01-03", 8),
         ]
     )
-    model = build_model("two_tower", _config(tmp_path, max_epochs=1))
-    model.fit(_split(frame), tune=False)
+    fitted = build_model(model, _config(tmp_path, model, max_epochs=1))
+    fitted.fit(_split(frame), tune=False)
 
-    ranking = model.recommend(["nuevo"])
+    ranking = fitted.recommend(["nuevo"])
 
     assert ranking["id_libro"].tolist() == ["popular", "rare"]
 
 
-def test_invalid_two_tower_file_is_rejected(tmp_path) -> None:
-    path = tmp_path / "two_tower_hyperparameters.json"
-    path.write_text(json.dumps({"embedding_dim": 8}), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="inválidos"):
-        load_two_tower_hyperparameters(path)
-
-
-def test_tune_writes_its_own_file(tmp_path) -> None:
-    rows = []
-    for user, start in (("u1", 0), ("u2", 2)):
-        for offset in range(10):
-            rows.append(
-                (user, f"b{start + offset}", f"2020-01-{offset + 1:02d}", 6 + offset % 4)
-            )
-    frame = _frame(rows)
+@pytest.mark.parametrize("model", ["two_tower", "rating_mlp"])
+def test_tune_does_not_write_a_study_or_touch_other_files(tmp_path, model: str) -> None:
+    stale = tmp_path / "two_tower_hyperparameters.json"
     two_stage = tmp_path / "tuned_hyperparameters.json"
     ease = tmp_path / "ease_hyperparameters.json"
+    stale.write_text("{}\n", encoding="utf-8")
     two_stage.write_text("{}\n", encoding="utf-8")
     ease.write_text("{}\n", encoding="utf-8")
-    config = PipelineConfig(
-        artifacts_dir=tmp_path,
-        model="two_tower",
-        optuna_trials=2,
-        random_seed=0,
-        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=1),
-        two_tower=TwoTowerConfig(
-            embedding_dim=4,
-            learning_rate=0.05,
-            n_negatives=2,
-            temperature=0.2,
-            max_epochs=1,
-            patience=1,
-            batch_size=16,
-            search=TwoTowerSearch(
-                embedding_dim=SearchRange(4, 8, integer=True),
-                learning_rate=SearchRange(0.01, 0.05, log=True),
-                n_negatives=SearchRange(2, 4, integer=True),
-                temperature=SearchRange(0.1, 0.3, log=True),
-            ),
-        ),
-    )
-    model = build_model("two_tower", config)
-    model.fit(_split(frame), tune=True)
+    frame = _neighbor_frame()
+    config = _config(tmp_path, model, max_epochs=1, patience=1)
+    fitted = build_model(model, config)
+    fitted.fit(_split(frame), tune=True)
 
-    saved = json.loads((tmp_path / "two_tower_hyperparameters.json").read_text(encoding="utf-8"))
+    assert stale.read_text(encoding="utf-8") == "{}\n"
     assert two_stage.read_text(encoding="utf-8") == "{}\n"
     assert ease.read_text(encoding="utf-8") == "{}\n"
-    assert saved["embedding_dim"] in {4, 5, 6, 7, 8}
-    assert saved["epochs"] == 1
-    assert model.hyperparameters_origin == "tune"
-    assert model.hyperparameters["model"] == "two_tower"
-
-    reused = build_model("two_tower", config)
-    reused.fit(_split(frame), tune=False)
-    assert reused.hyperparameters_origin == "saved"
-    assert reused.hyperparameters["embedding_dim"] == saved["embedding_dim"]
+    assert not (tmp_path / "rating_mlp_hyperparameters.json").exists()
+    assert fitted.hyperparameters_origin == "config"
+    assert fitted.hyperparameters["model"] == model
     seen = set(frame.loc[frame["id_lector"] == "u1", "id_libro"])
-    ranking = reused.recommend(["u1"])
+    ranking = fitted.recommend(["u1"])
     assert set(ranking["id_libro"]).isdisjoint(seen)
 
 
-def test_recommend_requires_fit() -> None:
-    model = build_model("two_tower", PipelineConfig())
+@pytest.mark.parametrize("model", ["two_tower", "rating_mlp"])
+def test_recommend_requires_fit(model: str) -> None:
+    fitted = build_model(model, PipelineConfig())
 
     with pytest.raises(RuntimeError, match="entrenarse"):
-        model.recommend(["u1"])
+        fitted.recommend(["u1"])
+
+
+def test_author_and_genre_get_their_own_rows(tmp_path) -> None:
+    frame = _frame(
+        [
+            ("u1", "a", "2020-01-01", 8),
+            ("u1", "b", "2020-01-02", 7),
+        ]
+    )
+    books = pd.DataFrame(
+        {
+            "id_libro": ["a", "b"],
+            "autor": ["Autora", ""],
+            "genero": ["Novela negra, intriga, terror", ""],
+        }
+    )
+    fitted = build_model("rating_mlp", _config(tmp_path, "rating_mlp", max_epochs=1))
+    fitted.fit(_split(frame, books), tune=False)
+
+    assert fitted.hyperparameters["n_authors"] == 2
+    assert fitted.hyperparameters["n_genres"] == 2
+
+
+def test_inner_fold_continues_without_resetting(tmp_path) -> None:
+    rows = []
+    for user in ("u1", "u2"):
+        for offset in range(4):
+            rows.append((user, f"b{offset}", f"2020-01-{offset + 1:02d}", 6 + offset))
+    frame = _frame(rows)
+    config = PipelineConfig(
+        artifacts_dir=tmp_path,
+        model="two_tower",
+        random_seed=0,
+        split=SplitConfig(rolling_folds=1, rolling_horizon=1, min_history=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=4,
+            hidden_dim=4,
+            output_dim=4,
+            learning_rate=0.05,
+            batch_size=4,
+            max_epochs=1,
+            patience=1,
+            finetune_epochs=1,
+        ),
+    )
+    fitted = build_model("two_tower", config)
+    fitted.fit(_split(frame), tune=False)
+
+    seen = set(frame.loc[frame["id_lector"] == "u1", "id_libro"])
+    ranking = fitted.recommend(["u1"])
+    assert set(ranking["id_libro"]).isdisjoint(seen)
+    assert fitted.hyperparameters["finetune_epochs"] == 1

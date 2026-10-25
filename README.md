@@ -49,7 +49,8 @@ cualquier modelo. `submit` reentrena con toda la historia y escribe el mismo
 uv run python main.py evaluate --model two_stage --note "pipeline actual"
 uv run python main.py evaluate --model popularity --note "baseline"
 uv run python main.py evaluate --model ease --note "EASE como modelo único"
-uv run python main.py evaluate --model two_tower --tune --note "two-tower contra el mismo hold-out"
+uv run python main.py evaluate --model rating_mlp --note "red unica del Colab"
+uv run python main.py evaluate --model two_tower --note "dos torres con producto"
 ```
 
 Un modelo nuevo implementa `fit(split)` y `recommend(users)` y se registra
@@ -58,8 +59,9 @@ no tiene que buscar candidatos y después ordenarlos. `split.history` es el
 train, `split.test` el hold-out y `validation_folds` los cortes internos;
 el último fold es la validación. `two_stage` separa retrieval y ranking.
 `ease` puntúa el catálogo con una matriz ítem-ítem y devuelve el top-20.
-`two_tower` aprende un embedding por libro y un vector de usuario, y ordena
-por coseno. La tabla numérica con la que LambdaRank ordena está en
+`rating_mlp` concatena embeddings de lector, libro, autor y género y predice
+el rating con una sola red. `two_tower` arma un vector por lado y ordena por
+su producto. La tabla numérica con la que LambdaRank ordena está en
 `two_stage/columns.py` y no la usa un modelo único.
 
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
@@ -71,10 +73,9 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
 
 `evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
-El de `ease` escribe `artifacts/ease_hyperparameters.json` y el de `two_tower`
-escribe `artifacts/two_tower_hyperparameters.json`. Cada modelo reutiliza solo
-el suyo: una corrida no pisa ni lee el archivo del otro. Si el archivo de ese
-modelo no existe, usa los hiperparámetros fijos.
+El de `ease` escribe `artifacts/ease_hyperparameters.json`. `rating_mlp` y
+`two_tower` no buscan hiperparámetros: usan los de su config y no leen ni
+escriben un JSON de tuneo.
 
 `--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra

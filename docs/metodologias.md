@@ -212,31 +212,46 @@ El study maximiza el NDCG@20 del último fold rolling y escribe
 archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
 incluye, y `ease_selected.*` guarda el trío elegido.
 
+## Rating MLP
+
+`RatingMlpModel` (`src/quelibroleo/rating_mlp.py`), modelo `rating_mlp`. Es una
+red de una etapa, con el mismo corte y el mismo NDCG@20. Se elige con
+`--model rating_mlp`.
+
+El lector, el libro, el autor y el género son embeddings de 512. El autor o el
+género vacío ocupa el índice 0. Un género con comas es una sola categoría. Esos
+cuatro vectores se concatenan y entra una sola red: densa de 256 con ReLU,
+densa de 64 con ReLU y una salida con sigmoide. El ranking ordena por ese
+rating predicho. No es un two-tower: no hay una red de cada lado ni un producto.
+
+La pérdida es el error cuadrático contra `(rating - 1) / 9`. Cada fila de
+entrenamiento es una lectura real. No se muestrean libros que el lector no
+leyó. Quien no tiene historia, o no llega a 20 libros, completa con popularidad.
+
+No hay Optuna. Los hiperparámetros están en `RatingMlpConfig`: dimensión 512,
+capas 256 y 64, learning rate 0,001, batch 256, tope de 30 épocas, paciencia 5
+y 5 épocas de continuación. `--tune` no abre un study.
+
+El último fold interno aparta su ventana. Se entrena sobre lo anterior y, si el
+NDCG@20 no mejora durante la paciencia, se vuelve a la mejor época. Esos pesos
+siguen entrenando las épocas de continuación sobre toda la historia previa al
+hold-out, sin reiniciar la red. Las últimas 20 de la evaluación no entran.
+
 ## Two-tower
 
-`TwoTowerModel` (`src/quelibroleo/two_tower.py`), modelo `two_tower`. Es otro
-recomendador de una etapa, con el mismo corte y el mismo NDCG@20. Se elige con
-`--model two_tower`.
+`TwoTowerModel` (`src/quelibroleo/two_tower.py`), modelo `two_tower`. Misma
+pérdida, mismo corte y el mismo protocolo de épocas que `rating_mlp`. Se elige
+con `--model two_tower`.
 
-Hay dos torres. La de ítem es un embedding por libro. La de usuario toma el
-promedio de esos embeddings sobre los libros leídos, pesado por rating, lo
-proyecta con una matriz lineal y normaliza. Al entrenar, el libro que se
-predice no entra en el promedio. El score es el coseno. Los negativos son
-libros al azar y la pérdida es un softmax. Quien no tiene historia, o no llega
-a 20 libros, completa con popularidad.
+Hay dos redes. La del lector toma su embedding de 512, pasa por una densa de
+512 con ReLU y proyecta a 256. La del libro concatena los embeddings de 512 del
+libro, del autor y del género, y hace el mismo recorrido hasta otro vector de
+256. El score es el producto de esos dos vectores. El sigmoide de ese producto
+solo entra en la pérdida. El orden del ranking es el del producto. La salida de
+256 es lineal: con ReLU el producto no bajaría de cero y el sigmoide no podría
+representar un rating por debajo del punto medio.
 
-Optuna recorre cuatro hiperparámetros. Las épocas no: hay un tope
-(`max_epochs`, defecto 5) y el último fold corta si el NDCG@20 no mejora
-durante `patience` épocas (defecto 2).
-
-| Parámetro | Valores | Qué cambia |
-| --- | --- | --- |
-| `embedding_dim` | 16–64, log. Defecto 32 | Tamaño de las dos torres |
-| `learning_rate` | 0,001–0,05, log. Defecto 0,01 | Paso de AdamW |
-| `n_negatives` | 8–64, log. Defecto 16 | Negativos aleatorios por lectura |
-| `temperature` | 0,05–0,5, log. Defecto 0,1 | Qué tan marcado es el softmax |
-
-El estudio escribe `artifacts/two_tower_hyperparameters.json`. No lee ni
-reemplaza `tuned_hyperparameters.json` ni `ease_hyperparameters.json`. En
-MLflow el tag `model` vale `two_tower` y `two_tower_selected.*` guarda lo
-elegido, incluidas las épocas con las que después se reentrena.
+`TwoTowerConfig` fija las mismas épocas, el learning rate y el batch, con
+capas de 512 y 256. No lee ni escribe un JSON de tuneo. Un
+`two_tower_hyperparameters.json` de la versión anterior se ignora. En MLflow el
+tag `model` distingue `rating_mlp` de `two_tower`.

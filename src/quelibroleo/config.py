@@ -156,56 +156,86 @@ class EaseConfig:
             raise ValueError("min_interactions debe ser positivo")
 
 
-@dataclass(frozen=True)
-class TwoTowerSearch:
-    """Hiperparámetros del two-tower que Optuna recorre."""
+def _check_neural_schedule(
+    *,
+    embedding_dim: int,
+    learning_rate: float,
+    batch_size: int,
+    max_epochs: int,
+    patience: int,
+    finetune_epochs: int,
+) -> None:
+    """Valida el bloque compartido por rating_mlp y two_tower."""
 
-    embedding_dim: SearchRange = field(
-        default_factory=lambda: SearchRange(16, 64, log=True, integer=True)
-    )
-    learning_rate: SearchRange = field(
-        default_factory=lambda: SearchRange(1e-3, 0.05, log=True)
-    )
-    n_negatives: SearchRange = field(
-        default_factory=lambda: SearchRange(8, 64, log=True, integer=True)
-    )
-    temperature: SearchRange = field(
-        default_factory=lambda: SearchRange(0.05, 0.5, log=True)
-    )
+    if embedding_dim < 1:
+        raise ValueError("embedding_dim debe ser positivo")
+    if learning_rate <= 0:
+        raise ValueError("learning_rate debe ser positivo")
+    if min(batch_size, max_epochs, patience) < 1:
+        raise ValueError("batch_size, max_epochs y patience deben ser positivos")
+    if finetune_epochs < 0:
+        raise ValueError("finetune_epochs no puede ser negativo")
+
+
+@dataclass(frozen=True)
+class RatingMlpConfig:
+    """Red única del Colab. Los hiperparámetros no pasan por Optuna.
+
+    Lector, libro, autor y género son embeddings. Se concatenan y una sola red
+    predice el rating. `--tune` no abre un study: se usan estos valores.
+    """
+
+    embedding_dim: int = 512
+    hidden_1: int = 256
+    hidden_2: int = 64
+    learning_rate: float = 0.001
+    batch_size: int = 256
+    max_epochs: int = 30
+    patience: int = 5
+    finetune_epochs: int = 5
+
+    def __post_init__(self) -> None:
+        _check_neural_schedule(
+            embedding_dim=self.embedding_dim,
+            learning_rate=self.learning_rate,
+            batch_size=self.batch_size,
+            max_epochs=self.max_epochs,
+            patience=self.patience,
+            finetune_epochs=self.finetune_epochs,
+        )
+        if min(self.hidden_1, self.hidden_2) < 1:
+            raise ValueError("las capas ocultas deben ser positivas")
 
 
 @dataclass(frozen=True)
 class TwoTowerConfig:
-    """Two-tower colaborativo. Sin `--tune` se usan estos valores.
+    """Dos torres. El score es el producto de los vectores, sin tercera red.
 
-    La torre de usuario proyecta el promedio de los libros leídos, pesado por
-    rating. La torre de ítem es el embedding del libro. El score es el coseno.
-    `max_epochs` es el tope; el study corta antes si el último fold no mejora.
+    El lector es un embedding pasado por su red. El libro concatena su
+    embedding con el de autor y el de género, y pasa por la otra. `--tune`
+    no abre un study: se usan estos valores.
     """
 
-    embedding_dim: int = 32
-    learning_rate: float = 0.01
-    n_negatives: int = 16
-    temperature: float = 0.1
-    max_epochs: int = 5
-    patience: int = 2
-    batch_size: int = 2048
-    weight_decay: float = 1e-6
-    search: TwoTowerSearch = field(default_factory=TwoTowerSearch)
+    embedding_dim: int = 512
+    hidden_dim: int = 512
+    output_dim: int = 256
+    learning_rate: float = 0.001
+    batch_size: int = 256
+    max_epochs: int = 30
+    patience: int = 5
+    finetune_epochs: int = 5
 
     def __post_init__(self) -> None:
-        if self.embedding_dim < 1:
-            raise ValueError("embedding_dim debe ser positivo")
-        if self.learning_rate <= 0:
-            raise ValueError("learning_rate debe ser positivo")
-        if self.n_negatives < 1:
-            raise ValueError("n_negatives debe ser positivo")
-        if self.temperature <= 0:
-            raise ValueError("temperature debe ser positivo")
-        if self.max_epochs < 1 or self.patience < 1 or self.batch_size < 1:
-            raise ValueError("max_epochs, patience y batch_size deben ser positivos")
-        if self.weight_decay < 0:
-            raise ValueError("weight_decay no puede ser negativo")
+        _check_neural_schedule(
+            embedding_dim=self.embedding_dim,
+            learning_rate=self.learning_rate,
+            batch_size=self.batch_size,
+            max_epochs=self.max_epochs,
+            patience=self.patience,
+            finetune_epochs=self.finetune_epochs,
+        )
+        if min(self.hidden_dim, self.output_dim) < 1:
+            raise ValueError("hidden_dim y output_dim deben ser positivos")
 
 
 @dataclass(frozen=True)
@@ -252,6 +282,7 @@ class PipelineConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)
     ease: EaseConfig = field(default_factory=EaseConfig)
+    rating_mlp: RatingMlpConfig = field(default_factory=RatingMlpConfig)
     two_tower: TwoTowerConfig = field(default_factory=TwoTowerConfig)
 
     def as_dict(self) -> dict[str, Any]:

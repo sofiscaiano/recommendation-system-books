@@ -11,7 +11,7 @@ from .config import PipelineConfig
 from .data import ITEM_COL, observed_catalog
 from .split_data import SplitData
 
-MODEL_NAMES = ("two_stage", "popularity", "ease", "two_tower")
+MODEL_NAMES = ("two_stage", "popularity", "ease", "rating_mlp", "two_tower")
 
 
 class Recommender(Protocol):
@@ -70,6 +70,10 @@ def build_model(name: str, config: PipelineConfig) -> Recommender:
         from .ease import EaseModel
 
         return EaseModel(config)
+    if name == "rating_mlp":
+        from .rating_mlp import RatingMlpModel
+
+        return RatingMlpModel(config)
     if name == "two_tower":
         from .two_tower import TwoTowerModel
 
