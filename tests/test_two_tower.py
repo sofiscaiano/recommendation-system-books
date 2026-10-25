@@ -158,7 +158,38 @@ def test_author_and_genre_get_their_own_rows(tmp_path) -> None:
     assert fitted.hyperparameters["n_genres"] == 2
 
 
-def test_submit_trains_without_the_holdout_and_then_adds_it() -> None:
+def test_submit_resumes_saved_weights_and_keeps_known_books(tmp_path, monkeypatch) -> None:
+    rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(25)]
+    frame = _frame(rows)
+    calls: list[str] = []
+    real = __import__("quelibroleo.neural", fromlist=["_run_epochs"])._run_epochs
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs["phase"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("quelibroleo.neural._run_epochs", spy)
+    config = _config(tmp_path, "two_tower", max_epochs=1, finetune_epochs=0)
+    first = build_model("two_tower", config)
+    first.fit(_split(frame.iloc[:5].reset_index(drop=True), holdout=True), tune=False)
+    assert calls == ["época"]
+    assert (tmp_path / "two_tower.pt").is_file()
+    kept = first._net.book.weight.detach().cpu().clone()
+    known = first._catalog.item_index["b0"]
+
+    calls.clear()
+    config = _config(tmp_path, "two_tower", max_epochs=1, finetune_epochs=0)
+    second = build_model("two_tower", config)
+    second.fit(_split(frame, holdout=False), tune=False)
+
+    assert calls == []
+    resumed = second._net.book.weight.detach().cpu()
+    assert torch.allclose(resumed[second._catalog.item_index["b0"]], kept[known])
+    assert second.hyperparameters["n_items"] == 25
+    assert "b24" in second._catalog.item_index
+
+
+def test_preholdout_drops_the_last_twenty() -> None:
     rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(25)]
     frame = _frame(rows)
 

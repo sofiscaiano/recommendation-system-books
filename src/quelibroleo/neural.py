@@ -3,14 +3,16 @@
 El usuario es un embedding de id_lector. Cada lectura real es una fila: el
 modelo predice su rating y el error es cuadrático contra (rating - 1) / 9.
 No hay libros negativos. En la evaluación se entrena con toda la historia
-previa al hold-out. En el submit se parte de ese mismo esquema y se suman
-algunas épocas en las que el hold-out ya entra.
+previa al hold-out y guarda los pesos. En el submit se leen esos pesos y se
+suman algunas épocas en las que el hold-out ya entra. Si el archivo no está,
+el submit rehace las épocas previas y desde ahí suma el hold-out.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -50,6 +52,8 @@ class InteractionCatalog:
     item_genre: np.ndarray
     n_authors: int
     n_genres: int
+    author_labels: tuple[str, ...]
+    genre_labels: tuple[str, ...]
 
 
 def pick_device() -> torch.device:
@@ -91,6 +95,8 @@ def build_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> InteractionCatalo
         item_genre=np.array([genre_index[value] for value in genres], dtype=np.int64),
         n_authors=len(author_index),
         n_genres=len(genre_index),
+        author_labels=_labels(author_index),
+        genre_labels=_labels(genre_index),
     )
 
 
@@ -150,9 +156,10 @@ def fit_neural(
 ) -> None:
     """Entrena ``max_epochs`` sin el hold-out.
 
-    En el submit, ``incorporate_holdout`` suma ``finetune_epochs`` sobre la
-    historia completa, desde los pesos que acaban de terminar. La evaluación
-    no hace esa segunda pasada: el NDCG del hold-out se mide afuera.
+    En el submit, si la evaluación guardó los pesos, solo corre las épocas que
+    suman el hold-out. Si ese archivo no está, rehace las ``max_epochs`` sin
+    el hold-out y desde ahí suma las otras. La evaluación no hace la segunda
+    pasada: el NDCG del hold-out se mide afuera, y al terminar guarda la red.
     """
 
     device = pick_device()
@@ -161,6 +168,27 @@ def fit_neural(
     optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
     rng = np.random.default_rng(config.random_seed)
     holdout_k = config.split.holdout_k
+    if incorporate_holdout and _resume(net, catalog, config, model_name):
+        if schedule.finetune_epochs < 1:
+            LOGGER.info("%s queda en los pesos de la evaluación", model_name)
+            return
+        LOGGER.info(
+            "%s continúa %s épocas con el hold-out incluido",
+            model_name,
+            schedule.finetune_epochs,
+        )
+        _run_epochs(
+            net,
+            training_rows(history, catalog),
+            optimizer,
+            schedule,
+            rng,
+            device,
+            epochs=schedule.finetune_epochs,
+            model_name=model_name,
+            phase="continuación",
+        )
+        return
     earlier = preholdout(history, holdout_k) if incorporate_holdout else None
     first = history if earlier is None else earlier
     if earlier is None:
@@ -171,7 +199,7 @@ def fit_neural(
         )
     else:
         LOGGER.info(
-            "%s entrena %s épocas sin las últimas %s lecturas de cada lector",
+            "%s no encontró pesos de la evaluación; entrena %s épocas sin las últimas %s",
             model_name,
             schedule.max_epochs,
             holdout_k,
@@ -187,6 +215,8 @@ def fit_neural(
         model_name=model_name,
         phase="época",
     )
+    if not incorporate_holdout:
+        _save_checkpoint(net, catalog, config, model_name)
     if earlier is None or schedule.finetune_epochs < 1:
         return
     LOGGER.info(
@@ -205,6 +235,158 @@ def fit_neural(
         model_name=model_name,
         phase="continuación",
     )
+
+
+def checkpoint_path(artifacts_dir: Path, model_name: str) -> Path:
+    """Archivo de pesos que la evaluación deja para el submit."""
+
+    return Path(artifacts_dir) / f"{model_name}.pt"
+
+
+_ROW_SOURCES = {
+    "user.weight": "users",
+    "user_embedding.weight": "users",
+    "book.weight": "items",
+    "author.weight": "authors",
+    "genre.weight": "genres",
+}
+
+
+def _save_checkpoint(
+    net: nn.Module,
+    catalog: InteractionCatalog,
+    config: PipelineConfig,
+    model_name: str,
+) -> None:
+    """Guarda pesos e índices para que el submit no rehaga las épocas."""
+
+    path = checkpoint_path(config.artifacts_dir, model_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "model": model_name,
+        "user_ids": [str(user) for user in catalog.user_ids],
+        "item_ids": [str(item) for item in catalog.item_ids],
+        "authors": list(catalog.author_labels),
+        "genres": list(catalog.genre_labels),
+        "state": {
+            key: value.detach().cpu().clone() for key, value in net.state_dict().items()
+        },
+    }
+    torch.save(payload, path)
+    LOGGER.info("%s guardó los pesos en %s", model_name, path)
+
+
+def _resume(
+    net: nn.Module,
+    catalog: InteractionCatalog,
+    config: PipelineConfig,
+    model_name: str,
+) -> bool:
+    """Copia los pesos guardados. Las filas nuevas se quedan en la inicialización."""
+
+    path = checkpoint_path(config.artifacts_dir, model_name)
+    if not path.is_file():
+        LOGGER.info("%s no encontró %s", model_name, path)
+        return False
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(payload, dict):
+            raise TypeError("el archivo no es un objeto")
+        state = payload["state"]
+        if payload.get("model") != model_name or payload.get("version") != 1:
+            raise ValueError("el archivo es de otro modelo")
+        if not isinstance(state, dict) or not _checkpoint_fits(state, net):
+            raise ValueError("la forma de la red no coincide")
+        users = [str(user) for user in payload["user_ids"]]
+        items = [str(item) for item in payload["item_ids"]]
+        authors = [str(author) for author in payload["authors"]]
+        genres = [str(genre) for genre in payload["genres"]]
+    except (OSError, KeyError, ValueError, RuntimeError, TypeError) as exc:
+        LOGGER.info("%s ignora %s (%s) y entrena de cero", model_name, path, exc)
+        return False
+    _transplant(
+        net,
+        state,
+        users=users,
+        items=items,
+        authors=authors,
+        genres=genres,
+        catalog=catalog,
+    )
+    LOGGER.info("%s retoma los pesos de %s", model_name, path)
+    return True
+
+
+def _checkpoint_fits(state: dict, net: nn.Module) -> bool:
+    """Las capas densas coinciden. Los embeddings coinciden en la dimensión."""
+
+    current = net.state_dict()
+    for key, value in current.items():
+        if key in {"item_author", "item_genre"}:
+            continue
+        previous = state.get(key)
+        if not isinstance(previous, torch.Tensor):
+            return False
+        if key in _ROW_SOURCES:
+            if previous.ndim != 2 or value.ndim != 2 or previous.shape[1] != value.shape[1]:
+                return False
+            continue
+        if previous.shape != value.shape:
+            return False
+    return True
+
+
+def _transplant(
+    net: nn.Module,
+    state: dict,
+    *,
+    users: list[str],
+    items: list[str],
+    authors: list[str],
+    genres: list[str],
+    catalog: InteractionCatalog,
+) -> None:
+    """Copia cada fila al índice nuevo del mismo id. El resto no se toca."""
+
+    saved = {
+        "users": users,
+        "items": items,
+        "authors": authors,
+        "genres": genres,
+    }
+    current_labels = {
+        "users": [str(user) for user in catalog.user_ids],
+        "items": [str(item) for item in catalog.item_ids],
+        "authors": list(catalog.author_labels),
+        "genres": list(catalog.genre_labels),
+    }
+    own = net.state_dict()
+    for key, value in own.items():
+        if key in {"item_author", "item_genre"}:
+            continue
+        previous = state[key]
+        kind = _ROW_SOURCES.get(key)
+        if kind is None:
+            value.copy_(previous)
+            continue
+        _copy_rows(value, previous, current_labels[kind], saved[kind])
+    net.load_state_dict(own)
+
+
+def _copy_rows(
+    destination: torch.Tensor,
+    source: torch.Tensor,
+    destination_labels: list[str],
+    source_labels: list[str],
+) -> None:
+    """Escribe en cada fila nueva el vector de la fila vieja con el mismo nombre."""
+
+    source_index = {label: index for index, label in enumerate(source_labels)}
+    for index, label in enumerate(destination_labels):
+        previous = source_index.get(label)
+        if previous is not None:
+            destination[index].copy_(source[previous])
 
 
 def rank_users(
@@ -380,6 +562,15 @@ def _vocabulary(values: list[str]) -> dict[str, int]:
 
     names = sorted({value for value in values if value})
     return {"": 0, **{name: index + 1 for index, name in enumerate(names)}}
+
+
+def _labels(vocabulary: dict[str, int]) -> tuple[str, ...]:
+    """Nombres en el orden de las filas del embedding."""
+
+    ordered = [""] * len(vocabulary)
+    for name, index in vocabulary.items():
+        ordered[index] = name
+    return tuple(ordered)
 
 
 def _run_epochs(
