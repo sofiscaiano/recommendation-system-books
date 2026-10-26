@@ -220,8 +220,9 @@ red de una etapa, con el mismo corte y el mismo NDCG@20. Se elige con
 
 El lector, el libro, el autor y el género son embeddings de 64. El autor o el
 género vacío ocupa el índice 0. Un género con comas es una sola categoría. Esos
-cuatro vectores se concatenan y entra una sola red: densa de 256 con ReLU,
-densa de 64 con ReLU y una salida con sigmoide. El ranking ordena por ese
+cuatro vectores se concatenan y entra una sola red: densa de 64 con ReLU
+y dropout 0,3, densa de 32 con ReLU y dropout 0,3, y una salida con sigmoide.
+El ranking ordena por ese
 rating predicho. No es un two-tower: no hay una red de cada lado ni un producto.
 
 El gradiente es el error cuadrático contra `(rating - 1) / 9`. Lo que se
@@ -230,8 +231,10 @@ entrenamiento es una lectura real. No se muestrean libros que el lector no
 leyó. Quien no tiene historia, o no llega a 20 libros, completa con popularidad.
 
 No hay Optuna. Los hiperparámetros están en `RatingMlpConfig`: dimensión 64,
-capas 256 y 64, learning rate 0,01, batch 256 y 30 épocas. `--tune` no abre
-un study.
+capas 64 y 32, dropout 0,3, AdamW con learning rate 0,01 y weight decay 0,01,
+batch 256 y hasta 30 épocas. Si el RMSE de validación no mejora durante
+`patience` épocas (defecto 3), corta y se queda con la mejor. `--tune` no
+abre un study.
 
 En la evaluación esas 30 épocas usan la historia anterior al hold-out. De ese
 prefijo, las últimas `validation_k` lecturas de cada lector con más que esas

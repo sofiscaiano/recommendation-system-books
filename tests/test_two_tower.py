@@ -65,7 +65,7 @@ def _config(tmp_path, model: str, **overrides: object) -> PipelineConfig:
     }
     values.update(overrides)
     if model == "rating_mlp":
-        block = RatingMlpConfig(hidden_1=8, hidden_2=4, **values)
+        block = RatingMlpConfig(hidden_1=8, hidden_2=4, dropout=0.0, **values)
         return PipelineConfig(artifacts_dir=tmp_path, model=model, rating_mlp=block)
     block = TwoTowerConfig(hidden_dim=8, output_dim=4, **values)
     return PipelineConfig(artifacts_dir=tmp_path, model=model, two_tower=block)
@@ -298,6 +298,50 @@ def test_run_epochs_restores_the_lowest_validation_loss(monkeypatch) -> None:
     )
 
     assert restored
+    assert int(net.bias.detach()) == 2
+
+
+def test_patience_stops_when_validation_stops_improving(monkeypatch) -> None:
+    from quelibroleo.neural import TrainSchedule, _run_epochs
+
+    net = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
+    schedule = TrainSchedule(0.01, 4, 3, 0, patience=2)
+    rows = (
+        np.array([0], dtype=np.int64),
+        np.array([0], dtype=np.int64),
+        np.array([0.5], dtype=np.float32),
+    )
+    state = {"epoch": 0}
+    planned = {1: 0.5, 2: 0.2, 3: 0.3, 4: 0.4, 5: 0.6}
+
+    def fake_epoch(module, *_args, **_kwargs):
+        state["epoch"] += 1
+        with torch.no_grad():
+            module.bias.fill_(state["epoch"])
+        return 0.2
+
+    monkeypatch.setattr("quelibroleo.neural._epoch", fake_epoch)
+    monkeypatch.setattr(
+        "quelibroleo.neural._validation_loss",
+        lambda module, *_args, **_kwargs: planned[int(module.bias.detach())],
+    )
+
+    restored = _run_epochs(
+        net,
+        rows,
+        optimizer,
+        schedule,
+        np.random.default_rng(0),
+        torch.device("cpu"),
+        epochs=5,
+        model_name="rating_mlp",
+        phase="época",
+        val_rows=rows,
+    )
+
+    assert restored
+    assert state["epoch"] == 4
     assert int(net.bias.detach()) == 2
 
 

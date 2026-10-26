@@ -47,7 +47,7 @@ de esa historia, los tres folds rolling. `rating_mlp` y `two_tower` entrenan
 hasta 30 épocas sobre `split.history`, pero apartan las últimas
 `validation_k` lecturas (defecto 5) de cada lector que tiene más. Cada época
 mide el RMSE en ese corte y los pesos que se guardan son los de la época
-más baja. En el submit, esas dos redes leen ese archivo y suman
+más baja. `rating_mlp` además corta si ese RMSE no mejora durante 3 épocas. En el submit, esas dos redes leen ese archivo y suman
 `finetune_epochs` con el hold-out ya incluido, sin volver a elegir época. Si
 el archivo no está, rehacen las 30 épocas y desde ahí suman el hold-out. El
 resto de los modelos, en el submit, se ajusta con la historia completa.

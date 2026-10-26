@@ -196,12 +196,15 @@ class RatingMlpConfig:
     """
 
     embedding_dim: int = 64
-    hidden_1: int = 256
-    hidden_2: int = 64
+    hidden_1: int = 64
+    hidden_2: int = 32
+    dropout: float = 0.3
     learning_rate: float = 0.01
+    weight_decay: float = 1e-2
     batch_size: int = 256
     max_epochs: int = 30
     finetune_epochs: int = 5
+    patience: int = 3
 
     def __post_init__(self) -> None:
         _check_neural_schedule(
@@ -213,6 +216,12 @@ class RatingMlpConfig:
         )
         if min(self.hidden_1, self.hidden_2) < 1:
             raise ValueError("las capas ocultas deben ser positivas")
+        if not 0.0 <= self.dropout < 1.0:
+            raise ValueError("dropout tiene que estar en [0, 1)")
+        if self.weight_decay < 0:
+            raise ValueError("weight_decay no puede ser negativo")
+        if self.patience < 1:
+            raise ValueError("patience debe ser positivo")
 
 
 @dataclass(frozen=True)

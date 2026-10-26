@@ -25,6 +25,7 @@ class _RatingMlp(nn.Module):
         embedding_dim: int,
         hidden_1: int,
         hidden_2: int,
+        dropout: float,
     ) -> None:
         super().__init__()
         self.user = nn.Embedding(len(catalog.user_ids), embedding_dim)
@@ -42,8 +43,10 @@ class _RatingMlp(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(embedding_dim * 4, hidden_1),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_1, hidden_2),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_2, 1),
         )
 
@@ -77,15 +80,18 @@ class RatingMlpModel(NeuralRanker):
             embedding_dim=block.embedding_dim,
             hidden_1=block.hidden_1,
             hidden_2=block.hidden_2,
+            dropout=block.dropout,
         )
 
     def schedule(self) -> TrainSchedule:
         block = self.config.rating_mlp
         return TrainSchedule(
             learning_rate=block.learning_rate,
+            weight_decay=block.weight_decay,
             batch_size=block.batch_size,
             max_epochs=block.max_epochs,
             finetune_epochs=block.finetune_epochs,
+            patience=block.patience,
         )
 
     def score_users(self, user_indices: np.ndarray) -> np.ndarray:
@@ -119,7 +125,10 @@ class RatingMlpModel(NeuralRanker):
             "embedding_dim": block.embedding_dim,
             "hidden_1": block.hidden_1,
             "hidden_2": block.hidden_2,
+            "dropout": block.dropout,
             "learning_rate": block.learning_rate,
+            "weight_decay": block.weight_decay,
+            "patience": block.patience,
             "batch_size": block.batch_size,
             "max_epochs": block.max_epochs,
             "finetune_epochs": block.finetune_epochs,

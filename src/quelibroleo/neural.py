@@ -41,6 +41,8 @@ class TrainSchedule:
     batch_size: int
     max_epochs: int
     finetune_epochs: int
+    weight_decay: float = 0.0
+    patience: int = 0
 
 
 @dataclass(frozen=True)
@@ -222,7 +224,7 @@ def fit_neural(
     device = pick_device()
     place_on_device(net, device)
     LOGGER.info("%s entrena en %s", model_name, device)
-    optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
+    optimizer = _optimizer(net, schedule)
     rng = np.random.default_rng(config.random_seed)
     holdout_k = config.split.holdout_k
     if incorporate_holdout and _resume(net, catalog, config, model_name):
@@ -296,7 +298,7 @@ def fit_neural(
     if earlier is None or schedule.finetune_epochs < 1:
         return
     if restored:
-        optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
+        optimizer = _optimizer(net, schedule)
     LOGGER.info(
         "%s incorpora el hold-out durante %s épocas",
         model_name,
@@ -681,14 +683,16 @@ def _run_epochs(
     """Varias épocas sobre las lecturas indicadas.
 
     Con validación, cada época mide el RMSE del mismo error cuadrático y al
-    final la red vuelve a la época de menor RMSE. Devuelve si restauró esos
-    pesos. El optimizador de esa pasada queda en la última época; quien sigue
-    entrenando arma uno nuevo.
+    final la red vuelve a la época de menor RMSE. Si ``patience`` es positivo
+    y la validación no mejora durante esas épocas, corta. Devuelve si
+    restauró esos pesos. El optimizador de esa pasada queda en la última
+    época; quien sigue entrenando arma uno nuevo.
     """
 
     best_state: dict[str, torch.Tensor] | None = None
     best_loss = float("inf")
     best_epoch = 0
+    stale = 0
     for epoch in range(1, epochs + 1):
         loss = _epoch(net, rows, optimizer, schedule.batch_size, rng, device)
         if val_rows is None:
@@ -707,6 +711,18 @@ def _run_epochs(
             best_loss = val_loss
             best_epoch = epoch
             best_state = _cpu_state(net)
+            stale = 0
+            continue
+        stale += 1
+        if schedule.patience > 0 and stale >= schedule.patience:
+            LOGGER.info(
+                "%s corta en la %s %s: la validación no mejora hace %s épocas",
+                model_name,
+                phase,
+                epoch,
+                schedule.patience,
+            )
+            break
     if best_state is None:
         return False
     net.load_state_dict(best_state)
@@ -719,6 +735,16 @@ def _run_epochs(
         best_loss,
     )
     return True
+
+
+def _optimizer(net: nn.Module, schedule: TrainSchedule) -> torch.optim.Optimizer:
+    """AdamW. ``weight_decay`` en cero no penaliza los pesos."""
+
+    return torch.optim.AdamW(
+        net.parameters(),
+        lr=schedule.learning_rate,
+        weight_decay=schedule.weight_decay,
+    )
 
 
 def _epoch(
