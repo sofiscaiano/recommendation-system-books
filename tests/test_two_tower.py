@@ -235,6 +235,24 @@ def test_last_reads_keep_short_users_and_the_recent_tail() -> None:
     assert set(train["id_libro"]).isdisjoint(set(val["id_libro"]))
 
 
+def test_validation_rmse_is_on_the_rating_scale() -> None:
+    from quelibroleo.neural import _validation_loss
+
+    class _Half(torch.nn.Module):
+        def forward(self, users: torch.Tensor, _items: torch.Tensor) -> torch.Tensor:
+            return torch.full((users.shape[0],), 0.5)
+
+    rows = (
+        np.array([0, 1], dtype=np.int64),
+        np.array([0, 1], dtype=np.int64),
+        np.array([1.0, 0.0], dtype=np.float32),
+    )
+
+    rmse = _validation_loss(_Half(), rows, batch_size=1, device=torch.device("cpu"))
+
+    assert rmse == pytest.approx(4.5)
+
+
 def test_validation_split_rejects_a_non_positive_k() -> None:
     with pytest.raises(ValueError, match="validation_k"):
         SplitConfig(validation_k=0)

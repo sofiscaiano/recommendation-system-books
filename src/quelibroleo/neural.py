@@ -210,9 +210,9 @@ def fit_neural(
     """Entrena ``max_epochs`` sin el hold-out y se queda con la mejor época.
 
     Dentro de esa historia, las últimas ``validation_k`` lecturas de cada
-    lector que tiene más no entran al gradiente. Cada época mide el error
-    cuadrático ahí y, al cerrar las épocas, la red vuelve a la de menor
-    error. En el submit, si la evaluación guardó los pesos, solo corre las
+    lector que tiene más no entran al gradiente. Cada época mide el RMSE del
+    rating ahí y, al cerrar las épocas, la red vuelve a la de menor RMSE. En
+    el submit, si la evaluación guardó los pesos, solo corre las
     épocas que suman el hold-out, sin ese corte. Si ese archivo no está,
     rehace las ``max_epochs`` sin el hold-out y desde ahí suma las otras. La
     evaluación no hace la segunda pasada: el NDCG del hold-out se mide
@@ -680,10 +680,11 @@ def _run_epochs(
 ) -> bool:
     """Varias épocas sobre las lecturas indicadas.
 
-    Con validación, cada época mide el error cuadrático ahí y al final la red
-    vuelve a la época de menor error. Devuelve si restauró esos pesos. El
-    optimizador de esa pasada queda en la última época; quien sigue
-    entrenando arma uno nuevo.
+    Con validación, cada época mide el RMSE del rating (escala 1–10) y al
+    final la red vuelve a la época de menor RMSE. El gradiente sigue siendo
+    el del error cuadrático sobre ``(rating - 1) / 9``. Devuelve si restauró
+    esos pesos. El optimizador de esa pasada queda en la última época; quien
+    sigue entrenando arma uno nuevo.
     """
 
     best_state: dict[str, torch.Tensor] | None = None
@@ -692,11 +693,11 @@ def _run_epochs(
     for epoch in range(1, epochs + 1):
         loss = _epoch(net, rows, optimizer, schedule.batch_size, rng, device)
         if val_rows is None:
-            LOGGER.info("%s %s %s: loss=%.4f", model_name, phase, epoch, loss)
+            LOGGER.info("%s %s %s: rmse=%.4f", model_name, phase, epoch, loss)
             continue
         val_loss = _validation_loss(net, val_rows, schedule.batch_size, device)
         LOGGER.info(
-            "%s %s %s: loss=%.4f val=%.4f",
+            "%s %s %s: rmse=%.4f val_rmse=%.4f",
             model_name,
             phase,
             epoch,
@@ -712,7 +713,7 @@ def _run_epochs(
     net.load_state_dict(best_state)
     place_on_device(net, device)
     LOGGER.info(
-        "%s se queda con la %s %s (val=%.4f)",
+        "%s se queda con la %s %s (val_rmse=%.4f)",
         model_name,
         phase,
         best_epoch,
@@ -729,14 +730,18 @@ def _epoch(
     rng: np.random.Generator,
     device: torch.device,
 ) -> float:
-    """Una pasada por las lecturas. Devuelve el error cuadrático medio."""
+    """Una pasada por las lecturas. El gradiente es el error cuadrático.
+
+    Devuelve el RMSE en la escala de rating 1–10.
+    """
 
     users, items, targets = rows
     if len(users) == 0:
         return 0.0
     net.train()
     order = rng.permutation(len(users))
-    losses: list[float] = []
+    total = 0.0
+    seen = 0
     for start in range(0, len(order), batch_size):
         batch = order[start : start + batch_size]
         user_batch = torch.as_tensor(users[batch], dtype=torch.long, device=device)
@@ -744,11 +749,12 @@ def _epoch(
         target_batch = torch.as_tensor(targets[batch], dtype=torch.float32, device=device)
         optimizer.zero_grad()
         prediction = net(user_batch, item_batch)
-        loss = nn.functional.mse_loss(prediction, target_batch)
-        loss.backward()
+        squared = (prediction - target_batch).square()
+        squared.mean().backward()
         optimizer.step()
-        losses.append(float(loss.detach().cpu()))
-    return float(np.mean(losses)) if losses else 0.0
+        total += float(squared.detach().sum().cpu())
+        seen += int(batch.shape[0])
+    return _rmse_on_rating_scale(total, seen)
 
 
 def _validation_loss(
@@ -757,7 +763,7 @@ def _validation_loss(
     batch_size: int,
     device: torch.device,
 ) -> float:
-    """Error cuadrático medio de las filas de validación, sin gradiente."""
+    """RMSE del rating 1–10 en las filas de validación, sin gradiente."""
 
     users, items, targets = rows
     if len(users) == 0:
@@ -772,9 +778,17 @@ def _validation_loss(
             item_batch = torch.tensor(items[start:stop], dtype=torch.long, device=device)
             target_batch = torch.tensor(targets[start:stop], dtype=torch.float32, device=device)
             prediction = net(user_batch, item_batch)
-            total += float(nn.functional.mse_loss(prediction, target_batch, reduction="sum").detach().cpu())
+            total += float((prediction - target_batch).square().sum().detach().cpu())
             seen += stop - start
-    return total / seen if seen else 0.0
+    return _rmse_on_rating_scale(total, seen)
+
+
+def _rmse_on_rating_scale(sum_squared_scaled: float, count: int) -> float:
+    """Pasa el error cuadrático de ``(rating - 1) / 9`` a RMSE en puntos de rating."""
+
+    if count <= 0:
+        return 0.0
+    return float(np.sqrt(sum_squared_scaled / count) * _RATING_SPAN)
 
 
 def _mask_seen(scores: np.ndarray, item_index: dict[str, int], seen: set[str]) -> None:

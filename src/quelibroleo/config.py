@@ -195,10 +195,10 @@ class RatingMlpConfig:
     predice el rating. `--tune` no abre un study: se usan estos valores.
     """
 
-    embedding_dim: int = 512
+    embedding_dim: int = 64
     hidden_1: int = 256
     hidden_2: int = 64
-    learning_rate: float = 0.001
+    learning_rate: float = 0.01
     batch_size: int = 256
     max_epochs: int = 30
     finetune_epochs: int = 5
