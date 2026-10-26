@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 import torch
 
-from quelibroleo.config import PipelineConfig, RatingMlpConfig, TwoTowerConfig
+from quelibroleo.config import (
+    PipelineConfig,
+    RatingMlpConfig,
+    SplitConfig,
+    TwoTowerConfig,
+)
 from quelibroleo.data import DataQualityReport
 from quelibroleo.models import build_model
 from quelibroleo.split_data import SplitData
@@ -213,3 +219,84 @@ def test_submit_fit_keeps_training_after_the_holdout_joins(tmp_path) -> None:
     ranking = fitted.recommend(["u1"])
     assert set(ranking["id_libro"]).isdisjoint(seen)
     assert fitted.hyperparameters["finetune_epochs"] == 1
+
+
+def test_last_reads_keep_short_users_and_the_recent_tail() -> None:
+    from quelibroleo.neural import last_reads_for_validation
+
+    rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(8)]
+    rows += [("u2", f"c{offset}", f"2020-02-{offset + 1:02d}", 6) for offset in range(5)]
+    rows += [("u3", "solo", "2020-03-01", 7)]
+    train, val = last_reads_for_validation(_frame(rows), 5)
+
+    assert set(val["id_lector"]) == {"u1"}
+    assert set(val["id_libro"]) == {f"b{offset}" for offset in range(3, 8)}
+    assert set(train["id_libro"]) >= {f"c{offset}" for offset in range(5)} | {"solo", "b0", "b1", "b2"}
+    assert set(train["id_libro"]).isdisjoint(set(val["id_libro"]))
+
+
+def test_validation_split_rejects_a_non_positive_k() -> None:
+    with pytest.raises(ValueError, match="validation_k"):
+        SplitConfig(validation_k=0)
+
+
+def test_run_epochs_restores_the_lowest_validation_loss(monkeypatch) -> None:
+    from quelibroleo.neural import TrainSchedule, _run_epochs
+
+    net = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.01)
+    schedule = TrainSchedule(0.01, 4, 3, 0)
+    rows = (
+        np.array([0], dtype=np.int64),
+        np.array([0], dtype=np.int64),
+        np.array([0.5], dtype=np.float32),
+    )
+    state = {"epoch": 0}
+    planned = {1: 0.4, 2: 0.1, 3: 0.3}
+
+    def fake_epoch(module, *_args, **_kwargs):
+        state["epoch"] += 1
+        with torch.no_grad():
+            module.bias.fill_(state["epoch"])
+        return 0.2
+
+    def fake_val(module, *_args, **_kwargs):
+        return planned[int(module.bias.detach())]
+
+    monkeypatch.setattr("quelibroleo.neural._epoch", fake_epoch)
+    monkeypatch.setattr("quelibroleo.neural._validation_loss", fake_val)
+
+    restored = _run_epochs(
+        net,
+        rows,
+        optimizer,
+        schedule,
+        np.random.default_rng(0),
+        torch.device("cpu"),
+        epochs=3,
+        model_name="rating_mlp",
+        phase="época",
+        val_rows=rows,
+    )
+
+    assert restored
+    assert int(net.bias.detach()) == 2
+
+
+def test_main_pass_holds_out_last_five_and_finetune_sees_the_tail(tmp_path, monkeypatch) -> None:
+    rows = [("u1", f"b{offset}", f"2020-01-{offset + 1:02d}", 8) for offset in range(30)]
+    frame = _frame(rows)
+    seen: list[tuple[str, int, int]] = []
+    real = __import__("quelibroleo.neural", fromlist=["_run_epochs"])._run_epochs
+
+    def spy(*args, **kwargs):
+        val_rows = kwargs.get("val_rows")
+        seen.append((kwargs["phase"], len(args[1][0]), 0 if val_rows is None else len(val_rows[0])))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("quelibroleo.neural._run_epochs", spy)
+    config = _config(tmp_path, "rating_mlp", max_epochs=1, finetune_epochs=1)
+    fitted = build_model("rating_mlp", config)
+    fitted.fit(_split(frame, holdout=False), tune=False)
+
+    assert seen == [("época", 5, 5), ("continuación", 30, 0)]

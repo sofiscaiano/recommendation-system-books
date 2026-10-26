@@ -2,10 +2,13 @@
 
 El usuario es un embedding de id_lector. Cada lectura real es una fila: el
 modelo predice su rating y el error es cuadrático contra (rating - 1) / 9.
-No hay libros negativos. En la evaluación se entrena con toda la historia
-previa al hold-out y guarda los pesos. En el submit se leen esos pesos y se
-suman algunas épocas en las que el hold-out ya entra. Si el archivo no está,
-el submit rehace las épocas previas y desde ahí suma el hold-out.
+No hay libros negativos. En la evaluación se entrena con la historia previa
+al hold-out. De ese prefijo, las últimas ``validation_k`` lecturas de cada
+lector con más que esas quedan afuera del gradiente y eligen la época: al
+terminar se restauran los pesos de la validación más baja. En el submit se
+leen esos pesos y se suman algunas épocas en las que el hold-out ya entra.
+Si el archivo no está, el submit rehace las épocas previas y desde ahí suma
+el hold-out.
 """
 
 from __future__ import annotations
@@ -173,6 +176,27 @@ def preholdout(history: pd.DataFrame, holdout_k: int) -> pd.DataFrame | None:
     return outer.train
 
 
+def last_reads_for_validation(
+    frame: pd.DataFrame,
+    k: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Últimas ``k`` lecturas de quien tiene más de ``k``. El resto queda en train.
+
+    Quien no llega a ese largo aporta todas sus filas al entrenamiento. Si
+    nadie llega, la validación vuelve vacía y no elige época.
+    """
+
+    if k < 1:
+        raise ValueError("k debe ser positivo")
+    empty = frame.iloc[0:0].copy()
+    if frame.empty:
+        return frame, empty
+    outer = leave_last_k(frame, k=k)
+    if outer.test.empty:
+        return frame, empty
+    return outer.train, outer.test
+
+
 def fit_neural(
     net: nn.Module,
     catalog: InteractionCatalog,
@@ -183,12 +207,16 @@ def fit_neural(
     model_name: str,
     incorporate_holdout: bool,
 ) -> None:
-    """Entrena ``max_epochs`` sin el hold-out.
+    """Entrena ``max_epochs`` sin el hold-out y se queda con la mejor época.
 
-    En el submit, si la evaluación guardó los pesos, solo corre las épocas que
-    suman el hold-out. Si ese archivo no está, rehace las ``max_epochs`` sin
-    el hold-out y desde ahí suma las otras. La evaluación no hace la segunda
-    pasada: el NDCG del hold-out se mide afuera, y al terminar guarda la red.
+    Dentro de esa historia, las últimas ``validation_k`` lecturas de cada
+    lector que tiene más no entran al gradiente. Cada época mide el error
+    cuadrático ahí y, al cerrar las épocas, la red vuelve a la de menor
+    error. En el submit, si la evaluación guardó los pesos, solo corre las
+    épocas que suman el hold-out, sin ese corte. Si ese archivo no está,
+    rehace las ``max_epochs`` sin el hold-out y desde ahí suma las otras. La
+    evaluación no hace la segunda pasada: el NDCG del hold-out se mide
+    afuera, y al terminar guarda la red ya restaurada.
     """
 
     device = pick_device()
@@ -220,6 +248,11 @@ def fit_neural(
         return
     earlier = preholdout(history, holdout_k) if incorporate_holdout else None
     first = history if earlier is None else earlier
+    train_history, val_history = last_reads_for_validation(
+        first,
+        config.split.validation_k,
+    )
+    val_rows = training_rows(val_history, catalog) if not val_history.empty else None
     if earlier is None:
         LOGGER.info(
             "%s entrena %s épocas con la historia previa al hold-out",
@@ -233,9 +266,22 @@ def fit_neural(
             schedule.max_epochs,
             holdout_k,
         )
-    _run_epochs(
+    if val_rows is None:
+        LOGGER.info(
+            "%s no aparta validación: ningún lector supera %s lecturas",
+            model_name,
+            config.split.validation_k,
+        )
+    else:
+        LOGGER.info(
+            "%s aparta las últimas %s lecturas de cada lector (%s filas) para elegir la época",
+            model_name,
+            config.split.validation_k,
+            len(val_history),
+        )
+    restored = _run_epochs(
         net,
-        training_rows(first, catalog),
+        training_rows(train_history, catalog),
         optimizer,
         schedule,
         rng,
@@ -243,11 +289,14 @@ def fit_neural(
         epochs=schedule.max_epochs,
         model_name=model_name,
         phase="época",
+        val_rows=val_rows,
     )
     if not incorporate_holdout:
         _save_checkpoint(net, catalog, config, model_name)
     if earlier is None or schedule.finetune_epochs < 1:
         return
+    if restored:
+        optimizer = torch.optim.Adam(net.parameters(), lr=schedule.learning_rate)
     LOGGER.info(
         "%s incorpora el hold-out durante %s épocas",
         model_name,
@@ -627,12 +676,49 @@ def _run_epochs(
     epochs: int,
     model_name: str,
     phase: str,
-) -> None:
-    """Varias épocas sobre las lecturas indicadas. El optimizador sigue de la pasada anterior."""
+    val_rows: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
+) -> bool:
+    """Varias épocas sobre las lecturas indicadas.
 
+    Con validación, cada época mide el error cuadrático ahí y al final la red
+    vuelve a la época de menor error. Devuelve si restauró esos pesos. El
+    optimizador de esa pasada queda en la última época; quien sigue
+    entrenando arma uno nuevo.
+    """
+
+    best_state: dict[str, torch.Tensor] | None = None
+    best_loss = float("inf")
+    best_epoch = 0
     for epoch in range(1, epochs + 1):
         loss = _epoch(net, rows, optimizer, schedule.batch_size, rng, device)
-        LOGGER.info("%s %s %s: loss=%.4f", model_name, phase, epoch, loss)
+        if val_rows is None:
+            LOGGER.info("%s %s %s: loss=%.4f", model_name, phase, epoch, loss)
+            continue
+        val_loss = _validation_loss(net, val_rows, schedule.batch_size, device)
+        LOGGER.info(
+            "%s %s %s: loss=%.4f val=%.4f",
+            model_name,
+            phase,
+            epoch,
+            loss,
+            val_loss,
+        )
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_epoch = epoch
+            best_state = _cpu_state(net)
+    if best_state is None:
+        return False
+    net.load_state_dict(best_state)
+    place_on_device(net, device)
+    LOGGER.info(
+        "%s se queda con la %s %s (val=%.4f)",
+        model_name,
+        phase,
+        best_epoch,
+        best_loss,
+    )
+    return True
 
 
 def _epoch(
@@ -663,6 +749,32 @@ def _epoch(
         optimizer.step()
         losses.append(float(loss.detach().cpu()))
     return float(np.mean(losses)) if losses else 0.0
+
+
+def _validation_loss(
+    net: nn.Module,
+    rows: tuple[np.ndarray, np.ndarray, np.ndarray],
+    batch_size: int,
+    device: torch.device,
+) -> float:
+    """Error cuadrático medio de las filas de validación, sin gradiente."""
+
+    users, items, targets = rows
+    if len(users) == 0:
+        return 0.0
+    net.eval()
+    total = 0.0
+    seen = 0
+    with torch.no_grad():
+        for start in range(0, len(users), batch_size):
+            stop = min(start + batch_size, len(users))
+            user_batch = torch.tensor(users[start:stop], dtype=torch.long, device=device)
+            item_batch = torch.tensor(items[start:stop], dtype=torch.long, device=device)
+            target_batch = torch.tensor(targets[start:stop], dtype=torch.float32, device=device)
+            prediction = net(user_batch, item_batch)
+            total += float(nn.functional.mse_loss(prediction, target_batch, reduction="sum").detach().cpu())
+            seen += stop - start
+    return total / seen if seen else 0.0
 
 
 def _mask_seen(scores: np.ndarray, item_index: dict[str, int], seen: set[str]) -> None:

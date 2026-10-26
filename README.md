@@ -43,12 +43,14 @@ uv run python main.py submit --note "qué se está entregando"
 El algoritmo se elige con `--model`. El hold-out tampoco cambia: en la
 evaluación, `split.history` es todo lo anterior a las últimas 20 lecturas y
 `split.test` son esas 20. `two_stage` y los studies de Optuna usan, adentro
-de esa historia, los tres folds rolling. `rating_mlp` y `two_tower` no: entrenan
-las 30 épocas con toda `split.history` y guardan los pesos. En el submit, esas
-dos redes leen ese archivo y suman `finetune_epochs` con el hold-out ya
-incluido. Si el archivo no está, rehacen las 30 épocas y desde ahí suman el
-hold-out. El resto de los modelos, en el submit, se ajusta con la historia
-completa.
+de esa historia, los tres folds rolling. `rating_mlp` y `two_tower` entrenan
+hasta 30 épocas sobre `split.history`, pero apartan las últimas
+`validation_k` lecturas (defecto 5) de cada lector que tiene más. Cada época
+mide el error cuadrático en ese corte y los pesos que se guardan son los de
+la época más baja. En el submit, esas dos redes leen ese archivo y suman
+`finetune_epochs` con el hold-out ya incluido, sin volver a elegir época. Si
+el archivo no está, rehacen las 30 épocas y desde ahí suman el hold-out. El
+resto de los modelos, en el submit, se ajusta con la historia completa.
 
 ```bash
 uv run python main.py evaluate --model two_stage --note "pipeline actual"

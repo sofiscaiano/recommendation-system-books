@@ -232,13 +232,18 @@ No hay Optuna. Los hiperparámetros están en `RatingMlpConfig`: dimensión 512,
 capas 256 y 64, learning rate 0,001, batch 256 y 30 épocas. `--tune` no abre
 un study.
 
-En la evaluación esas 30 épocas usan toda la historia anterior al hold-out, y
-el NDCG@20 se mide una vez contra las últimas 20. Al terminar se guardan los
-pesos en `artifacts/rating_mlp.pt` o `artifacts/two_tower.pt`. En el submit se
-leen esos pesos y, sin repetir las 30 épocas, se suman `finetune_epochs`
-(defecto 5) con el hold-out ya dentro de la historia. Un libro que aparece por
-primera vez en esas 20 recibe una fila nueva. Si el archivo no está, el submit
-rehace las 30 épocas y desde ahí suma las otras.
+En la evaluación esas 30 épocas usan la historia anterior al hold-out. De ese
+prefijo, las últimas `validation_k` lecturas de cada lector con más que esas
+(defecto 5, en `SplitConfig`) no entran al gradiente. Quien no llega a ese
+largo queda entero en el entrenamiento. Cada época mide el error cuadrático
+en ese corte y, al terminar, la red vuelve a la época de menor error. El
+NDCG@20 se mide una vez contra las últimas 20, que no participaron de esa
+elección. Los pesos restaurados quedan en `artifacts/rating_mlp.pt` o
+`artifacts/two_tower.pt`. En el submit se leen esos pesos y, sin repetir las
+30 épocas ni volver a elegir, se suman `finetune_epochs` (defecto 5) con el
+hold-out ya dentro de la historia. Un libro que aparece por primera vez en
+esas 20 recibe una fila nueva. Si el archivo no está, el submit rehace las 30
+épocas, restaura la mejor y desde ahí suma las otras.
 
 ## Two-tower
 

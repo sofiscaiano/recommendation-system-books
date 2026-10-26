@@ -32,12 +32,23 @@ def search_ranges(search: Any) -> dict[str, SearchRange]:
 
 @dataclass(frozen=True)
 class SplitConfig:
-    """Parámetros del holdout y del backtesting temporal."""
+    """Parámetros del holdout y del backtesting temporal.
+
+    ``validation_k`` aparta, dentro de la historia con la que entrenan
+    ``rating_mlp`` y ``two_tower``, las últimas lecturas de cada lector que
+    tiene más que esas. Esa validación elige la época. El hold-out de
+    evaluación no se usa ahí.
+    """
 
     holdout_k: int = 20
     rolling_folds: int = 3
     rolling_horizon: int = 20
     min_history: int = 5
+    validation_k: int = 5
+
+    def __post_init__(self) -> None:
+        if self.validation_k < 1:
+            raise ValueError("validation_k debe ser positivo")
 
 
 @dataclass(frozen=True)
