@@ -235,7 +235,7 @@ def test_last_reads_keep_short_users_and_the_recent_tail() -> None:
     assert set(train["id_libro"]).isdisjoint(set(val["id_libro"]))
 
 
-def test_validation_rmse_is_on_the_rating_scale() -> None:
+def test_validation_rmse_is_the_square_root_of_the_squared_error() -> None:
     from quelibroleo.neural import _validation_loss
 
     class _Half(torch.nn.Module):
@@ -250,7 +250,7 @@ def test_validation_rmse_is_on_the_rating_scale() -> None:
 
     rmse = _validation_loss(_Half(), rows, batch_size=1, device=torch.device("cpu"))
 
-    assert rmse == pytest.approx(4.5)
+    assert rmse == pytest.approx(0.5)
 
 
 def test_validation_split_rejects_a_non_positive_k() -> None:

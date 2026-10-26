@@ -210,8 +210,8 @@ def fit_neural(
     """Entrena ``max_epochs`` sin el hold-out y se queda con la mejor época.
 
     Dentro de esa historia, las últimas ``validation_k`` lecturas de cada
-    lector que tiene más no entran al gradiente. Cada época mide el RMSE del
-    rating ahí y, al cerrar las épocas, la red vuelve a la de menor RMSE. En
+    lector que tiene más no entran al gradiente. Cada época mide el RMSE de
+    ese error y, al cerrar las épocas, la red vuelve a la de menor RMSE. En
     el submit, si la evaluación guardó los pesos, solo corre las
     épocas que suman el hold-out, sin ese corte. Si ese archivo no está,
     rehace las ``max_epochs`` sin el hold-out y desde ahí suma las otras. La
@@ -680,11 +680,10 @@ def _run_epochs(
 ) -> bool:
     """Varias épocas sobre las lecturas indicadas.
 
-    Con validación, cada época mide el RMSE del rating (escala 1–10) y al
-    final la red vuelve a la época de menor RMSE. El gradiente sigue siendo
-    el del error cuadrático sobre ``(rating - 1) / 9``. Devuelve si restauró
-    esos pesos. El optimizador de esa pasada queda en la última época; quien
-    sigue entrenando arma uno nuevo.
+    Con validación, cada época mide el RMSE del mismo error cuadrático y al
+    final la red vuelve a la época de menor RMSE. Devuelve si restauró esos
+    pesos. El optimizador de esa pasada queda en la última época; quien sigue
+    entrenando arma uno nuevo.
     """
 
     best_state: dict[str, torch.Tensor] | None = None
@@ -732,7 +731,7 @@ def _epoch(
 ) -> float:
     """Una pasada por las lecturas. El gradiente es el error cuadrático.
 
-    Devuelve el RMSE en la escala de rating 1–10.
+    Devuelve el RMSE, la raíz de ese error medio.
     """
 
     users, items, targets = rows
@@ -754,7 +753,7 @@ def _epoch(
         optimizer.step()
         total += float(squared.detach().sum().cpu())
         seen += int(batch.shape[0])
-    return _rmse_on_rating_scale(total, seen)
+    return _rmse(total, seen)
 
 
 def _validation_loss(
@@ -763,7 +762,7 @@ def _validation_loss(
     batch_size: int,
     device: torch.device,
 ) -> float:
-    """RMSE del rating 1–10 en las filas de validación, sin gradiente."""
+    """RMSE de las filas de validación, sin gradiente."""
 
     users, items, targets = rows
     if len(users) == 0:
@@ -780,15 +779,15 @@ def _validation_loss(
             prediction = net(user_batch, item_batch)
             total += float((prediction - target_batch).square().sum().detach().cpu())
             seen += stop - start
-    return _rmse_on_rating_scale(total, seen)
+    return _rmse(total, seen)
 
 
-def _rmse_on_rating_scale(sum_squared_scaled: float, count: int) -> float:
-    """Pasa el error cuadrático de ``(rating - 1) / 9`` a RMSE en puntos de rating."""
+def _rmse(sum_squared: float, count: int) -> float:
+    """Raíz del error cuadrático medio."""
 
     if count <= 0:
         return 0.0
-    return float(np.sqrt(sum_squared_scaled / count) * _RATING_SPAN)
+    return float(np.sqrt(sum_squared / count))
 
 
 def _mask_seen(scores: np.ndarray, item_index: dict[str, int], seen: set[str]) -> None:

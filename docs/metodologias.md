@@ -225,10 +225,9 @@ densa de 64 con ReLU y una salida con sigmoide. El ranking ordena por ese
 rating predicho. No es un two-tower: no hay una red de cada lado ni un producto.
 
 El gradiente es el error cuadrático contra `(rating - 1) / 9`. Lo que se
-mira en cada época es el RMSE de ese error llevado a la escala 1–10: la raíz
-del error cuadrático, multiplicada por 9. Cada fila de entrenamiento es una
-lectura real. No se muestrean libros que el lector no leyó. Quien no tiene
-historia, o no llega a 20 libros, completa con popularidad.
+mira en cada época es el RMSE, la raíz de ese error medio. Cada fila de
+entrenamiento es una lectura real. No se muestrean libros que el lector no
+leyó. Quien no tiene historia, o no llega a 20 libros, completa con popularidad.
 
 No hay Optuna. Los hiperparámetros están en `RatingMlpConfig`: dimensión 64,
 capas 256 y 64, learning rate 0,01, batch 256 y 30 épocas. `--tune` no abre
@@ -237,8 +236,8 @@ un study.
 En la evaluación esas 30 épocas usan la historia anterior al hold-out. De ese
 prefijo, las últimas `validation_k` lecturas de cada lector con más que esas
 (defecto 5, en `SplitConfig`) no entran al gradiente. Quien no llega a ese
-largo queda entero en el entrenamiento. Cada época mide el RMSE del rating
-en ese corte y, al terminar, la red vuelve a la época de menor RMSE. El
+largo queda entero en el entrenamiento. Cada época mide el RMSE en ese
+corte y, al terminar, la red vuelve a la época de menor RMSE. El
 NDCG@20 se mide una vez contra las últimas 20, que no participaron de esa
 elección. Los pesos restaurados quedan en `artifacts/rating_mlp.pt` o
 `artifacts/two_tower.pt`. En el submit se leen esos pesos y, sin repetir las
