@@ -157,6 +157,34 @@ class EaseConfig:
 
 
 @dataclass(frozen=True)
+class TwoTowerConfig:
+    """Two-tower de Covington (2016) con la pérdida de Yi (2019). Sin Optuna.
+
+    Solo la época sale de la validación: NDCG@20 del último fold rolling.
+    """
+
+    embedding_dim: int = 64
+    dropout: float = 0.1
+    temperature: float = 0.05
+    batch_size: int = 1024
+    learning_rate: float = 1e-3
+    weight_decay: float = 1e-4
+    max_epochs: int = 30
+    patience: int = 3
+    min_item_reads: int = 5
+
+    def __post_init__(self) -> None:
+        if min(self.embedding_dim, self.batch_size, self.max_epochs, self.patience) < 1:
+            raise ValueError("dimensión, batch, épocas y patience deben ser positivos")
+        if self.min_item_reads < 1:
+            raise ValueError("min_item_reads debe ser positivo")
+        if not 0.0 <= self.dropout < 1.0:
+            raise ValueError("dropout tiene que estar en [0, 1)")
+        if self.temperature <= 0 or self.learning_rate <= 0 or self.weight_decay < 0:
+            raise ValueError("temperatura y learning rate positivos; weight decay no negativo")
+
+
+@dataclass(frozen=True)
 class RankerConfig:
     """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna.
 
@@ -200,6 +228,7 @@ class PipelineConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)
     ease: EaseConfig = field(default_factory=EaseConfig)
+    two_tower: TwoTowerConfig = field(default_factory=TwoTowerConfig)
 
     def as_dict(self) -> dict[str, Any]:
         """Devuelve una representación apta para JSON."""

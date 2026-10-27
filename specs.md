@@ -103,6 +103,8 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 
+`two_tower` no tiene study ni archivo: usa `TwoTowerConfig`. La torre de lector promedia los embeddings de toda su historia (Covington et al., 2016); la de libro usa id, autor y género, y comparte la tabla de id. La pérdida es softmax con negativos del batch y corrección logQ (Yi et al., 2019). Cada ejemplo es la historia anterior a un corte y una de las 20 lecturas siguientes, ponderada por su rating. Solo los libros con al menos `min_item_reads` lecturas son candidatos. La cantidad de épocas sale del NDCG@20 del último fold (patience 3); después se reentrena de cero con toda la historia recibida durante esas épocas.
+
 ## Interfaz
 
 Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelibroleo/` y `main.py`.
@@ -110,17 +112,19 @@ Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelib
 ```bash
 uv run python main.py evaluate --model two_stage --note "qué se está probando"
 uv run python main.py evaluate --model ease --tune --note "EASE contra el mismo hold-out"
+uv run python main.py evaluate --model two_tower --note "two-tower contra el mismo hold-out"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
 uv run python main.py export-serving
 ```
 
-`--model` elige el algoritmo (`two_stage`, `popularity` o `ease`). Train, folds de
+`--model` elige el algoritmo (`two_stage`, `popularity`, `ease` o `two_tower`). Train, folds de
 validación y test salen siempre de `split_data.py`. La entrega sigue siendo
 `submission.csv` con los lectores de `ejemplo.csv`. Un modelo nuevo solo
 implementa `fit` y `recommend`; no tiene que separar retrieval y ranking.
 `two_stage` sí lo hace, y sus columnas numéricas están en `two_stage/columns.py`.
-`ease` es un único modelo ítem-ítem.
+`ease` es un único modelo ítem-ítem. `two_tower` es de una etapa: un vector por
+lector y otro por libro, y el ranking es su producto.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 
