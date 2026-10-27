@@ -32,23 +32,12 @@ def search_ranges(search: Any) -> dict[str, SearchRange]:
 
 @dataclass(frozen=True)
 class SplitConfig:
-    """Parámetros del holdout y del backtesting temporal.
-
-    ``validation_k`` aparta, dentro de la historia con la que entrenan
-    ``rating_mlp`` y ``two_tower``, las últimas lecturas de cada lector que
-    tiene más que esas. Esa validación elige la época. El hold-out de
-    evaluación no se usa ahí.
-    """
+    """Parámetros del holdout y del backtesting temporal."""
 
     holdout_k: int = 20
     rolling_folds: int = 3
     rolling_horizon: int = 20
     min_history: int = 5
-    validation_k: int = 5
-
-    def __post_init__(self) -> None:
-        if self.validation_k < 1:
-            raise ValueError("validation_k debe ser positivo")
 
 
 @dataclass(frozen=True)
@@ -167,92 +156,6 @@ class EaseConfig:
             raise ValueError("min_interactions debe ser positivo")
 
 
-def _check_neural_schedule(
-    *,
-    embedding_dim: int,
-    learning_rate: float,
-    batch_size: int,
-    max_epochs: int,
-    finetune_epochs: int,
-) -> None:
-    """Valida el bloque compartido por rating_mlp y two_tower."""
-
-    if embedding_dim < 1:
-        raise ValueError("embedding_dim debe ser positivo")
-    if learning_rate <= 0:
-        raise ValueError("learning_rate debe ser positivo")
-    if min(batch_size, max_epochs) < 1:
-        raise ValueError("batch_size y max_epochs deben ser positivos")
-    if finetune_epochs < 0:
-        raise ValueError("finetune_epochs no puede ser negativo")
-
-
-@dataclass(frozen=True)
-class RatingMlpConfig:
-    """Red única del Colab. Los hiperparámetros no pasan por Optuna.
-
-    Lector, libro, autor y género son embeddings. Se concatenan y una sola red
-    predice el rating. `--tune` no abre un study: se usan estos valores.
-    """
-
-    embedding_dim: int = 64
-    hidden_1: int = 64
-    hidden_2: int = 32
-    dropout: float = 0.3
-    learning_rate: float = 0.01
-    weight_decay: float = 1e-2
-    batch_size: int = 256
-    max_epochs: int = 30
-    finetune_epochs: int = 5
-    patience: int = 3
-
-    def __post_init__(self) -> None:
-        _check_neural_schedule(
-            embedding_dim=self.embedding_dim,
-            learning_rate=self.learning_rate,
-            batch_size=self.batch_size,
-            max_epochs=self.max_epochs,
-            finetune_epochs=self.finetune_epochs,
-        )
-        if min(self.hidden_1, self.hidden_2) < 1:
-            raise ValueError("las capas ocultas deben ser positivas")
-        if not 0.0 <= self.dropout < 1.0:
-            raise ValueError("dropout tiene que estar en [0, 1)")
-        if self.weight_decay < 0:
-            raise ValueError("weight_decay no puede ser negativo")
-        if self.patience < 1:
-            raise ValueError("patience debe ser positivo")
-
-
-@dataclass(frozen=True)
-class TwoTowerConfig:
-    """Dos torres. El score es el producto de los vectores, sin tercera red.
-
-    El lector es un embedding pasado por su red. El libro concatena su
-    embedding con el de autor y el de género, y pasa por la otra. `--tune`
-    no abre un study: se usan estos valores.
-    """
-
-    embedding_dim: int = 512
-    hidden_dim: int = 512
-    output_dim: int = 256
-    learning_rate: float = 0.001
-    batch_size: int = 256
-    max_epochs: int = 30
-    finetune_epochs: int = 5
-
-    def __post_init__(self) -> None:
-        _check_neural_schedule(
-            embedding_dim=self.embedding_dim,
-            learning_rate=self.learning_rate,
-            batch_size=self.batch_size,
-            max_epochs=self.max_epochs,
-            finetune_epochs=self.finetune_epochs,
-        )
-        if min(self.hidden_dim, self.output_dim) < 1:
-            raise ValueError("hidden_dim y output_dim deben ser positivos")
-
-
 @dataclass(frozen=True)
 class RankerConfig:
     """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna.
@@ -297,8 +200,6 @@ class PipelineConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)
     ease: EaseConfig = field(default_factory=EaseConfig)
-    rating_mlp: RatingMlpConfig = field(default_factory=RatingMlpConfig)
-    two_tower: TwoTowerConfig = field(default_factory=TwoTowerConfig)
 
     def as_dict(self) -> dict[str, Any]:
         """Devuelve una representación apta para JSON."""

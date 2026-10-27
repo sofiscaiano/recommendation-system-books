@@ -103,8 +103,6 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 
-`rating_mlp` y `two_tower` no tienen study. `two_tower` usa embeddings de 512 y Adam con learning rate 0,001. `rating_mlp` usa embeddings de 64, capas de 64 y 32, dropout 0,3, AdamW con learning rate 0,01 y weight decay 0,01, y corta si la validación no mejora en 3 épocas. Los dos tienen batch 256 y 30 épocas sobre la historia previa al hold-out. De ese prefijo, `SplitConfig.validation_k` (defecto 5) aparta las últimas lecturas de cada lector que tiene más; cada época mide el RMSE de ese error y los pesos guardados son los de la época más baja. El gradiente sigue siendo el error cuadrático de `(rating - 1) / 9`. El NDCG@20 de la evaluación se mide contra el hold-out, que no entra en esa elección, y los pesos quedan en `artifacts/rating_mlp.pt` o `artifacts/two_tower.pt`. El submit los lee y suma `finetune_epochs` (defecto 5) con el hold-out incluido, sin volver a elegir época. Si el archivo no está, rehace las 30 épocas, restaura la mejor y desde ahí suma las otras. `--tune` no abre un study para estos dos modelos. Un `two_tower_hyperparameters.json` viejo se ignora.
-
 ## Interfaz
 
 Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelibroleo/` y `main.py`.
@@ -112,25 +110,21 @@ Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelib
 ```bash
 uv run python main.py evaluate --model two_stage --note "qué se está probando"
 uv run python main.py evaluate --model ease --tune --note "EASE contra el mismo hold-out"
-uv run python main.py evaluate --model rating_mlp --note "red unica del Colab"
-uv run python main.py evaluate --model two_tower --note "dos torres con producto"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
 uv run python main.py export-serving
 ```
 
-`--model` elige el algoritmo (`two_stage`, `popularity`, `ease`, `rating_mlp` o `two_tower`). Train, folds de
+`--model` elige el algoritmo (`two_stage`, `popularity` o `ease`). Train, folds de
 validación y test salen siempre de `split_data.py`. La entrega sigue siendo
 `submission.csv` con los lectores de `ejemplo.csv`. Un modelo nuevo solo
 implementa `fit` y `recommend`; no tiene que separar retrieval y ranking.
 `two_stage` sí lo hace, y sus columnas numéricas están en `two_stage/columns.py`.
-`ease` es un único modelo ítem-ítem. `rating_mlp` predice el rating con una red
-sobre los embeddings concatenados. `two_tower` es de una etapa: dos redes y el
-producto de sus vectores.
+`ease` es un único modelo ítem-ítem.
 
 `--note` es obligatorio en `evaluate`, `submit` y `all`. Sin subcomando, el CLI evalúa.
 
-Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-modelo-comando-modo-sufijo`) queda en el tag `run_name` y el algoritmo en el tag `model`. En `artifacts/run.json` y en los diagnósticos también queda el nombre. Con `--tune`, el study de `two_stage` corre en una hija `{run_name}__pipeline` y el de `ease` en `{run_name}__ease`. `rating_mlp` y `two_tower` no abren study.
+Cada corrida abre un run en el experimento MLflow `quelibroleo` (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI`). El nombre (`fecha-modelo-comando-modo-sufijo`) queda en el tag `run_name` y el algoritmo en el tag `model`. En `artifacts/run.json` y en los diagnósticos también queda el nombre. Con `--tune`, el study de `two_stage` corre en una hija `{run_name}__pipeline` y el de `ease` en `{run_name}__ease`.
 
 `export-serving` ajusta las fuentes sobre toda la historia y escribe `artifacts/serving.joblib`. La API (`serving/app.py`) carga ese artefacto una vez y, por lector, solo rankea. Las valoraciones de la demo viven en el navegador y no se escriben en `data.db`.
 

@@ -40,35 +40,24 @@ uv run python main.py evaluate --note "qué se está probando"
 uv run python main.py submit --note "qué se está entregando"
 ```
 
-El algoritmo se elige con `--model`. El hold-out tampoco cambia: en la
-evaluación, `split.history` es todo lo anterior a las últimas 20 lecturas y
-`split.test` son esas 20. `two_stage` y los studies de Optuna usan, adentro
-de esa historia, los tres folds rolling. `rating_mlp` y `two_tower` entrenan
-hasta 30 épocas sobre `split.history`, pero apartan las últimas
-`validation_k` lecturas (defecto 5) de cada lector que tiene más. Cada época
-mide el RMSE en ese corte y los pesos que se guardan son los de la época
-más baja. `rating_mlp` además corta si ese RMSE no mejora durante 3 épocas. En el submit, esas dos redes leen ese archivo y suman
-`finetune_epochs` con el hold-out ya incluido, sin volver a elegir época. Si
-el archivo no está, rehacen las 30 épocas y desde ahí suman el hold-out. El
-resto de los modelos, en el submit, se ajusta con la historia completa.
+El algoritmo se elige con `--model`. El corte no: train, los tres folds de
+validación y el test de las últimas 20 salen de `split_data.py` para
+cualquier modelo. `submit` reentrena con toda la historia y escribe el mismo
+`submission.csv`.
 
 ```bash
 uv run python main.py evaluate --model two_stage --note "pipeline actual"
 uv run python main.py evaluate --model popularity --note "baseline"
 uv run python main.py evaluate --model ease --note "EASE como modelo único"
-uv run python main.py evaluate --model rating_mlp --note "red unica del Colab"
-uv run python main.py evaluate --model two_tower --note "dos torres con producto"
 ```
 
 Un modelo nuevo implementa `fit(split)` y `recommend(users)` y se registra
 en `build_model` (`src/quelibroleo/models.py`). Puede ser un solo modelo:
 no tiene que buscar candidatos y después ordenarlos. `split.history` es el
-train y `split.test` el hold-out. `validation_folds` es la validación de
-`two_stage` y de Optuna. `two_stage` separa retrieval y ranking.
+train, `split.test` el hold-out y `validation_folds` los cortes internos;
+el último fold es la validación. `two_stage` separa retrieval y ranking.
 `ease` puntúa el catálogo con una matriz ítem-ítem y devuelve el top-20.
-`rating_mlp` concatena embeddings de lector, libro, autor y género y predice
-el rating con una sola red. `two_tower` arma un vector por lado y ordena por
-su producto. La tabla numérica con la que LambdaRank ordena está en
+La tabla numérica con la que LambdaRank ordena está en
 `two_stage/columns.py` y no la usa un modelo único.
 
 La búsqueda completa de hiperparámetros es opcional y considerablemente más
@@ -80,9 +69,9 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
 
 `evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
-El de `ease` escribe `artifacts/ease_hyperparameters.json`. `rating_mlp` y
-`two_tower` no buscan hiperparámetros: usan los de su config y no leen ni
-escriben un JSON de tuneo.
+El de `ease` escribe `artifacts/ease_hyperparameters.json`. Cada modelo
+reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro. Si
+el archivo de ese modelo no existe, usa los hiperparámetros fijos.
 
 `--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra

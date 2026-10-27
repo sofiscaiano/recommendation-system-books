@@ -66,8 +66,6 @@ def _reuses_saved_file(config: PipelineConfig) -> bool:
         from .ease import has_saved_ease_hyperparameters
 
         return has_saved_ease_hyperparameters(config.artifacts_dir)
-    if config.model in {"rating_mlp", "two_tower"}:
-        return False
     return has_saved_hyperparameters(config.artifacts_dir)
 
 

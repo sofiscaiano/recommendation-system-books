@@ -23,7 +23,7 @@ Resultado oficial del sistema completo contra el baseline de popularidad.
 | `baseline_ndcg_at_20` | NDCG@20 de popularidad sobre todos los lectores del hold-out. |
 | `retrieval_recall` | Proporción de los 20 libros de test que sobreviven dentro de los candidatos, antes de rankear. |
 | `retrieval_oracle_ndcg_at_20` | NDCG@20 máximo posible con esos candidatos: ordena primero los libros de test recuperados, del rating más alto al más bajo. Es el techo del ranker. |
-| `candidate_budget` | Corte del ranking ya fusionado: cuántos candidatos entran al ranker. Cada fuente se lee más profundo que este corte. En un modelo de una etapa (`ease`, `popularity`, `rating_mlp`, `two_tower`) estos tres campos de retrieval valen 0. |
+| `candidate_budget` | Corte del ranking ya fusionado: cuántos candidatos entran al ranker. Cada fuente se lee más profundo que este corte. En un modelo de una etapa (`ease`, `popularity`) estos tres campos de retrieval valen 0. |
 | `evaluation_users` | Lectores incluidos en el holdout. |
 
 Esas mismas claves se publican en MLflow. Los hiperparámetros de cada trial de
