@@ -14,6 +14,7 @@ from quelibroleo.two_tower import (
     TwoTowerNet,
     build_sequences,
     build_vocabulary,
+    history_bags,
     in_batch_loss,
     sample_examples,
 )
@@ -52,11 +53,21 @@ def test_examples_take_history_before_the_cut_and_target_inside_the_window() -> 
     assert (position_in_user - lengths < 20).all()
 
 
+def test_recent_bag_keeps_the_last_reads_before_the_cut() -> None:
+    items = np.arange(10)
+
+    full, recent = history_bags(items, np.array([0, 5]), np.array([4, 2]), recent=3)
+
+    assert full[0].tolist() == [0, 1, 2, 3, 5, 6]
+    assert recent[0].tolist() == [1, 2, 3, 5, 6]
+    assert recent[1].tolist() == [0, 3]
+
+
 def test_a_repeated_book_is_not_its_own_negative() -> None:
     history = _history(n_users=2, n_reads=5)
     vocabulary = build_vocabulary(history, _books(history), min_reads=1)
     net = TwoTowerNet(vocabulary, TwoTowerConfig(embedding_dim=8, dropout=0.0))
-    bags = (torch.tensor([0, 1]), torch.tensor([0, 1]))
+    bags = history_bags(np.array([0, 1]), np.array([0, 1]), np.array([1, 1]), recent=20)
     weights = torch.ones(2)
 
     repeated = in_batch_loss(net, bags, torch.tensor([3, 3]), weights, temperature=1.0)

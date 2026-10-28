@@ -139,6 +139,18 @@ def _bags(items: np.ndarray, starts: np.ndarray, lengths: np.ndarray) -> tuple[t
     return torch.as_tensor(items[flat]), torch.as_tensor(offsets)
 
 
+def history_bags(
+    items: np.ndarray, starts: np.ndarray, lengths: np.ndarray, recent: int
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """La historia completa y, si ``recent`` es positivo, sus últimas ``recent`` lecturas."""
+
+    bags = [_bags(items, starts, lengths)]
+    if recent > 0:
+        short = np.minimum(lengths, recent)
+        bags.append(_bags(items, starts + lengths - short, short))
+    return bags
+
+
 def _mlp(inputs: int, dim: int, dropout: float) -> nn.Sequential:
     return nn.Sequential(nn.Linear(inputs, dim), nn.ReLU(), nn.Dropout(dropout), nn.Linear(dim, dim))
 
@@ -152,15 +164,26 @@ class TwoTowerNet(nn.Module):
         self.item = nn.Embedding(len(vocabulary.item_ids), dim)
         self.author = nn.Embedding(vocabulary.n_authors, dim)
         self.genre = nn.Embedding(vocabulary.n_genres, dim)
-        self.user_tower = _mlp(dim, dim, config.dropout)
+        self.user_authors = config.user_authors
+        self.recent_reads = config.recent_reads
+        n_bags = 2 if config.recent_reads > 0 else 1
+        per_bag = 2 if config.user_authors else 1
+        self.user_tower = _mlp(n_bags * per_bag * dim, dim, config.dropout)
         self.item_tower = _mlp(3 * dim, dim, config.dropout)
         self.register_buffer("item_author", torch.as_tensor(vocabulary.item_author))
         self.register_buffer("item_genre", torch.as_tensor(vocabulary.item_genre))
         self.register_buffer("log_q", torch.as_tensor(vocabulary.log_q, dtype=torch.float32))
 
-    def users(self, indices: torch.Tensor, offsets: torch.Tensor) -> torch.Tensor:
-        pooled = F.embedding_bag(indices, self.item.weight, offsets, mode="mean")
-        return F.normalize(self.user_tower(pooled), dim=-1)
+    def users(self, bags: list[tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
+        """Promedio de libros (y de sus autores) de cada bolsa, concatenados."""
+
+        pooled = []
+        for indices, offsets in bags:
+            pooled.append(F.embedding_bag(indices, self.item.weight, offsets, mode="mean"))
+            if self.user_authors:
+                authors = self.item_author[indices]
+                pooled.append(F.embedding_bag(authors, self.author.weight, offsets, mode="mean"))
+        return F.normalize(self.user_tower(torch.cat(pooled, dim=-1)), dim=-1)
 
     def items(self, items: torch.Tensor) -> torch.Tensor:
         features = torch.cat(
@@ -176,7 +199,7 @@ class TwoTowerNet(nn.Module):
 
 def in_batch_loss(
     net: TwoTowerNet,
-    bags: tuple[torch.Tensor, torch.Tensor],
+    bags: list[tuple[torch.Tensor, torch.Tensor]],
     targets: torch.Tensor,
     weights: torch.Tensor,
     temperature: float,
@@ -186,7 +209,7 @@ def in_batch_loss(
     Si un libro se repite en el batch, sus copias no cuentan como negativo.
     """
 
-    logits = net.users(*bags) @ net.items(targets).T / temperature - net.log_q[targets]
+    logits = net.users(bags) @ net.items(targets).T / temperature - net.log_q[targets]
     duplicate = targets[None, :] == targets[:, None]
     duplicate.fill_diagonal_(False)
     logits = logits.masked_fill(duplicate, float("-inf"))
@@ -210,7 +233,7 @@ def _train_epoch(
         batch = order[begin : begin + config.batch_size]
         loss = in_batch_loss(
             net,
-            _bags(sequences.items, starts[batch], lengths[batch]),
+            history_bags(sequences.items, starts[batch], lengths[batch], net.recent_reads),
             torch.as_tensor(sequences.items[targets[batch]]),
             torch.as_tensor(sequences.ratings[targets[batch]]),
             config.temperature,
@@ -229,8 +252,9 @@ def _top_items(net: TwoTowerNet, sequences: Sequences, users: list[str]) -> np.n
     net.eval()
     rows = np.array([sequences.position[user] for user in users], dtype=np.int64)
     lengths = sequences.lengths[rows]
-    seen, offsets = _bags(sequences.items, sequences.starts[rows], lengths)
-    scores = net.users(seen, offsets) @ net.items(torch.arange(net.item.num_embeddings)).T
+    bags = history_bags(sequences.items, sequences.starts[rows], lengths, net.recent_reads)
+    seen = bags[0][0]
+    scores = net.users(bags) @ net.items(torch.arange(net.item.num_embeddings)).T
     scores[torch.as_tensor(np.repeat(np.arange(len(rows)), lengths)), seen] = float("-inf")
     top = torch.topk(scores, k=min(TOP_K, scores.shape[1]), dim=1)
     return np.where(torch.isfinite(top.values).numpy(), top.indices.numpy(), -1)

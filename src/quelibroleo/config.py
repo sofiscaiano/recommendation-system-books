@@ -161,9 +161,13 @@ class TwoTowerConfig:
     """Two-tower de Covington (2016) con la pérdida de Yi (2019). Sin Optuna.
 
     Solo la época sale de la validación: NDCG@20 del último fold rolling.
+    `recent_reads` suma a la torre de lector el promedio de sus últimas
+    lecturas (0 lo apaga). `user_authors` suma el promedio de los autores.
     """
 
     embedding_dim: int = 64
+    recent_reads: int = 20
+    user_authors: bool = True
     dropout: float = 0.1
     temperature: float = 0.05
     batch_size: int = 1024
@@ -178,6 +182,8 @@ class TwoTowerConfig:
             raise ValueError("dimensión, batch, épocas y patience deben ser positivos")
         if self.min_item_reads < 1:
             raise ValueError("min_item_reads debe ser positivo")
+        if self.recent_reads < 0:
+            raise ValueError("recent_reads no puede ser negativo")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout tiene que estar en [0, 1)")
         if self.temperature <= 0 or self.learning_rate <= 0 or self.weight_decay < 0:
