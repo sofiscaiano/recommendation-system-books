@@ -473,10 +473,13 @@ class TfidfRetriever:
 
 
 def _two_tower_candidates(*args: object) -> tuple:
-    """Corre en el proceso hijo: ahí sí se importa torch."""
+    """Corre en el proceso hijo: ahí sí se importa torch y LightGBM no corrió."""
 
-    from ..two_tower import top_candidates
+    import torch
 
+    from ..two_tower import DEFAULT_THREADS, top_candidates
+
+    torch.set_num_threads(DEFAULT_THREADS)
     return top_candidates(*args)
 
 

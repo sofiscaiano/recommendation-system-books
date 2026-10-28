@@ -36,6 +36,7 @@ LOGGER = logging.getLogger(__name__)
 TOP_K = 20
 
 # Con el OpenMP de LightGBM ya activo en el proceso, torch multihilo se cuelga en macOS.
+DEFAULT_THREADS = torch.get_num_threads()
 torch.set_num_threads(1)
 
 
