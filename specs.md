@@ -105,6 +105,8 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 `two_tower` no tiene study ni archivo: usa `TwoTowerConfig`. La torre de lector concatena el promedio de los embeddings de toda su historia (Covington et al., 2016), el de sus últimas `recent_reads` lecturas (defecto 20) y, para cada uno, el promedio de los autores de esos libros (`user_authors`). La de libro usa id, autor y género, y comparte con la de lector las tablas de id y de autor. La pérdida es softmax con negativos del batch y corrección logQ (Yi et al., 2019). Cada ejemplo es la historia anterior a un corte y una de las 20 lecturas siguientes, ponderada por su rating. Solo los libros con al menos `min_item_reads` lecturas son candidatos. La cantidad de épocas sale del NDCG@20 del último fold (patience 3); después se reentrena de cero con toda la historia recibida durante esas épocas.
 
+Con `--two-tower-source`, `two_stage` suma el two-tower como sexta fuente de retrieval. En cada fold entrena con la historia de ese fold, con la misma validación interna y el mismo reentrenamiento, una sola vez antes del study. Optuna agrega `weight__two_tower` y LambdaRank recibe `score_two_tower`, `rank_two_tower` y `present_two_tower`. El two-tower corre en un proceso hijo porque torch y LightGBM cargan copias distintas de OpenMP y, en macOS, juntos en un proceso se cuelgan o abortan (LightGBM #6595). Si una fuente activa no tiene peso guardado, la corrida falla en vez de ignorarla: la primera vez hay que usar `--tune`.
+
 ## Interfaz
 
 Python ≥ 3.13. Dependencias con `uv sync`. Código de producción: `src/quelibroleo/` y `main.py`.
@@ -115,6 +117,7 @@ uv run python main.py evaluate --model ease --tune --note "EASE contra el mismo 
 uv run python main.py evaluate --model two_tower --note "two-tower contra el mismo hold-out"
 uv run python main.py submit --note "qué se está entregando"
 uv run python main.py evaluate --tune --label-gain exponential --note "..."
+uv run python main.py evaluate --tune --label-gain exponential --two-tower-source --note "..."
 uv run python main.py export-serving
 ```
 
