@@ -10,6 +10,7 @@ from quelibroleo.config import PipelineConfig, SplitConfig, TwoTowerConfig
 from quelibroleo.data import DataQualityReport
 from quelibroleo.models import build_model
 from quelibroleo.split_data import SplitData
+from quelibroleo.two_stage.retrieval import TwoTowerRetriever
 from quelibroleo.two_tower import (
     TwoTowerNet,
     build_sequences,
@@ -73,6 +74,24 @@ def test_a_repeated_book_is_not_its_own_negative() -> None:
     repeated = in_batch_loss(net, bags, torch.tensor([3, 3]), weights, temperature=1.0)
 
     assert float(repeated.detach()) == 0.0
+
+
+def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None:
+    history = _history()
+    config = PipelineConfig(
+        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
+        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+    )
+    source = TwoTowerRetriever(config).fit(history, _books(history))
+
+    candidates = source.recommend(["u0", "nuevo"], history, n=5)
+
+    seen = set(history.loc[history["id_lector"] == "u0", "id_libro"])
+    assert list(candidates.columns) == ["id_lector", "id_libro", "source", "score", "rank"]
+    assert set(candidates["id_lector"]) == {"u0"}
+    assert candidates["rank"].tolist() == [1, 2, 3]
+    assert set(candidates["id_libro"]).isdisjoint(seen)
+    assert (candidates["source"] == "two_tower").all()
 
 
 def test_fit_recommends_unseen_books_and_falls_back_to_popularity() -> None:

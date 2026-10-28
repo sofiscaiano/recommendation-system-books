@@ -472,6 +472,68 @@ class TfidfRetriever:
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
 
 
+def _two_tower_candidates(*args: object) -> tuple:
+    """Corre en el proceso hijo: ahí sí se importa torch."""
+
+    from ..two_tower import top_candidates
+
+    return top_candidates(*args)
+
+
+class TwoTowerRetriever:
+    """El two-tower como fuente. Entrena y puntúa en un proceso hijo.
+
+    torch y LightGBM cargan copias distintas de libomp y juntas se caen en
+    macOS (LightGBM #6595). Este proceso nunca importa torch. El
+    entrenamiento ocurre en ``recommend``, con la historia guardada en ``fit``.
+    """
+
+    source_name = "two_tower"
+
+    def __init__(self, config: PipelineConfig) -> None:
+        self.config = config
+        self._interactions: pd.DataFrame | None = None
+        self._catalog: pd.DataFrame | None = None
+
+    def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> TwoTowerRetriever:
+        self._interactions = interactions
+        self._catalog = catalog
+        return self
+
+    def recommend(
+        self,
+        users: list[str] | tuple[str, ...],
+        history: pd.DataFrame,
+        n: int,
+    ) -> pd.DataFrame:
+        if self._interactions is None or self._catalog is None:
+            raise RuntimeError("El recomendador debe entrenarse antes de recomendar")
+        from concurrent.futures import ProcessPoolExecutor
+        from multiprocessing import get_context
+
+        with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
+            known, indices, scores, item_ids = pool.submit(
+                _two_tower_candidates,
+                self._interactions,
+                self._catalog,
+                self.config,
+                list(users),
+                n,
+            ).result()
+        if not known:
+            return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+        valid = indices >= 0
+        return pd.DataFrame(
+            {
+                USER_COL: np.repeat(np.array(known, dtype=object), valid.sum(axis=1)),
+                ITEM_COL: item_ids[indices[valid]],
+                "source": self.source_name,
+                "score": scores[valid].astype(float),
+                "rank": np.nonzero(valid)[1] + 1,
+            }
+        )
+
+
 def build_default_retrievers(
     *,
     random_state: int = 42,
@@ -479,10 +541,11 @@ def build_default_retrievers(
     implicit_iterations: int = 20,
     half_life_days: float = 365.0,
     tfidf_max_features: int = 60_000,
+    two_tower: PipelineConfig | None = None,
 ) -> list[Retriever]:
-    """Fuentes activas: popularidad, coseno, ALS, BPR y TF-IDF."""
+    """Fuentes activas: popularidad, coseno, ALS, BPR, TF-IDF y, si se pide, el two-tower."""
 
-    return [
+    sources: list[Retriever] = [
         PopularityRecommender(),
         ItemCosineRetriever(half_life_days=half_life_days),
         ImplicitMFRetriever(
@@ -504,6 +567,9 @@ def build_default_retrievers(
             half_life_days=half_life_days,
         ),
     ]
+    if two_tower is not None:
+        sources.append(TwoTowerRetriever(two_tower))
+    return sources
 
 
 def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
@@ -516,6 +582,7 @@ def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
         implicit_iterations=retrieval.implicit_iterations,
         half_life_days=retrieval.recency_half_life_days,
         tfidf_max_features=retrieval.tfidf_max_features,
+        two_tower=config if retrieval.two_tower_source else None,
     )
 
 

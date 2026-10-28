@@ -149,6 +149,12 @@ def _weights_for_active_sources(
     """Descarta pesos de fuentes que el pipeline ya no entrena."""
 
     active = set(_active_source_names(config))
+    missing = sorted(active - set(weights))
+    if missing:
+        raise ValueError(
+            f"No hay peso para {', '.join(missing)}: la fusión la ignoraría. "
+            "Corré evaluate --tune con estas fuentes."
+        )
     kept = {source: weight for source, weight in weights.items() if source in active}
     dropped = sorted(set(weights) - active)
     if dropped:

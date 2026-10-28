@@ -246,8 +246,10 @@ def _train_epoch(
 
 
 @torch.no_grad()
-def _top_items(net: TwoTowerNet, sequences: Sequences, users: list[str]) -> np.ndarray:
-    """Top-20 del vocabulario para cada lector, sin lo que ya leyó."""
+def _top_items(
+    net: TwoTowerNet, sequences: Sequences, users: list[str], k: int = TOP_K
+) -> tuple[np.ndarray, np.ndarray]:
+    """Top-k del vocabulario y su score para cada lector, sin lo que ya leyó. -1 si no alcanza."""
 
     net.eval()
     rows = np.array([sequences.position[user] for user in users], dtype=np.int64)
@@ -256,8 +258,9 @@ def _top_items(net: TwoTowerNet, sequences: Sequences, users: list[str]) -> np.n
     seen = bags[0][0]
     scores = net.users(bags) @ net.items(torch.arange(net.item.num_embeddings)).T
     scores[torch.as_tensor(np.repeat(np.arange(len(rows)), lengths)), seen] = float("-inf")
-    top = torch.topk(scores, k=min(TOP_K, scores.shape[1]), dim=1)
-    return np.where(torch.isfinite(top.values).numpy(), top.indices.numpy(), -1)
+    top = torch.topk(scores, k=min(k, scores.shape[1]), dim=1)
+    values = top.values.numpy()
+    return np.where(np.isfinite(values), top.indices.numpy(), -1), values
 
 
 def recommend_frame(
@@ -271,7 +274,7 @@ def recommend_frame(
     """Top-20 del two-tower. Sin historia en el vocabulario, o si no llega a 20, popularidad."""
 
     known = [user for user in users if user in sequences.position]
-    picks = dict(zip(known, _top_items(net, sequences, known), strict=True)) if known else {}
+    picks = dict(zip(known, _top_items(net, sequences, known)[0], strict=True)) if known else {}
     fallback = popularity.recommend(users, history, n=TOP_K).groupby(USER_COL)[ITEM_COL].agg(list)
     rows: list[dict[str, object]] = []
     for user in users:
@@ -338,11 +341,45 @@ def train(
     return trained, best_epoch, best_ndcg
 
 
-def _catalog_history(split: SplitData) -> pd.DataFrame:
-    """Historia con ids como texto y solo libros del catálogo."""
+def fit_history(
+    history: pd.DataFrame, books: pd.DataFrame, config: PipelineConfig
+) -> tuple[Trained, int, float]:
+    """Elige las épocas en el último fold de ``history`` y reentrena con toda ella."""
 
-    history = split.history.astype({USER_COL: str, ITEM_COL: str})
-    return history[history[ITEM_COL].isin(set(split.books[ITEM_COL].astype(str)))]
+    history = history.astype({USER_COL: str, ITEM_COL: str})
+    history = history[history[ITEM_COL].isin(set(books[ITEM_COL].astype(str)))]
+    fold = validation_folds(history, config)[-1]
+    _, epochs, val_ndcg = train(
+        fold.train,
+        books,
+        config,
+        epochs=config.two_tower.max_epochs,
+        validation=(list(fold.query_users), fold.target),
+    )
+    LOGGER.info("two_tower reentrena %s épocas con toda la historia", epochs)
+    trained, _, _ = train(history, books, config, epochs=epochs)
+    return trained, epochs, val_ndcg
+
+
+def top_candidates(
+    history: pd.DataFrame,
+    books: pd.DataFrame,
+    config: PipelineConfig,
+    users: list[str],
+    n: int,
+) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
+    """Lectores con historia, índices y scores de su top-n, e ids del vocabulario.
+
+    Arrays en vez de un DataFrame: viajan baratos desde el proceso hijo.
+    """
+
+    trained, _, _ = fit_history(history, books, config)
+    known = [str(user) for user in users if str(user) in trained.sequences.position]
+    if not known:
+        empty = np.empty((0, 0))
+        return [], empty.astype(np.int64), empty.astype(np.float32), trained.vocabulary.item_ids
+    indices, scores = _top_items(trained.net, trained.sequences, known, k=n)
+    return known, indices, scores, trained.vocabulary.item_ids
 
 
 class TwoTowerModel:
@@ -362,17 +399,7 @@ class TwoTowerModel:
 
         if tune:
             LOGGER.info("two_tower no tiene study: --tune no cambia sus hiperparámetros")
-        history = _catalog_history(split)
-        fold = validation_folds(history, self.config)[-1]
-        _, epochs, val_ndcg = train(
-            fold.train,
-            split.books,
-            self.config,
-            epochs=self.config.two_tower.max_epochs,
-            validation=(list(fold.query_users), fold.target),
-        )
-        LOGGER.info("two_tower reentrena %s épocas con toda la historia", epochs)
-        self._trained, _, _ = train(history, split.books, self.config, epochs=epochs)
+        self._trained, epochs, val_ndcg = fit_history(split.history, split.books, self.config)
         self.hyperparameters = {
             "model": self.name,
             **asdict(self.config.two_tower),

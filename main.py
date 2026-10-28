@@ -50,6 +50,13 @@ LabelGainOption = Annotated[
         help="Ganancia de LambdaRank: linear (0..10) o exponential (2^rel-1). Cambiarla exige --tune",
     ),
 ]
+TwoTowerSourceOption = Annotated[
+    bool,
+    typer.Option(
+        "--two-tower-source",
+        help="two_stage suma el two-tower como fuente de retrieval. Exige --tune la primera vez",
+    ),
+]
 ModelOption = Annotated[
     str,
     typer.Option(
@@ -83,6 +90,7 @@ def _config(
     note: str,
     label_gain: str,
     model: str,
+    two_tower_source: bool = False,
 ) -> PipelineConfig:
     """Arma la config de la corrida con las rutas, la nota y el modelo."""
 
@@ -97,6 +105,7 @@ def _config(
         run_note=note,
         model=model,
         ranker=replace(base.ranker, label_gain=label_gain),
+        retrieval=replace(base.retrieval, two_tower_source=two_tower_source),
     )
 
 
@@ -112,13 +121,16 @@ def _run(
     note: str,
     label_gain: str,
     model: str,
+    two_tower_source: bool = False,
 ) -> None:
     """Ejecuta evaluate, submit o ambos con la misma configuración."""
 
     if not note.strip():
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
-    config = _config(db, example, output, artifacts, seed, note, label_gain, model)
+    config = _config(
+        db, example, output, artifacts, seed, note, label_gain, model, two_tower_source
+    )
     logging.getLogger(__name__).info(
         "Comando %s (model=%s, tune=%s). Log en %s",
         command,
@@ -175,6 +187,7 @@ def evaluate(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
+    two_tower_source: TwoTowerSourceOption = False,
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
 
@@ -189,6 +202,7 @@ def evaluate(
         note=note,
         label_gain=label_gain,
         model=model,
+        two_tower_source=two_tower_source,
     )
 
 
@@ -203,6 +217,7 @@ def submit(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
+    two_tower_source: TwoTowerSourceOption = False,
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
 
@@ -217,6 +232,7 @@ def submit(
         note=note,
         label_gain=label_gain,
         model=model,
+        two_tower_source=two_tower_source,
     )
 
 
@@ -231,6 +247,7 @@ def run_all(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
+    two_tower_source: TwoTowerSourceOption = False,
 ) -> None:
     """Evalúa y después genera la entrega."""
 
@@ -245,6 +262,7 @@ def run_all(
         note=note,
         label_gain=label_gain,
         model=model,
+        two_tower_source=two_tower_source,
     )
 
 

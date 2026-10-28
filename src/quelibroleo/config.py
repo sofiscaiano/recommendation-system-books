@@ -62,7 +62,11 @@ class RetrievalSearch:
 
 @dataclass(frozen=True)
 class RetrievalConfig:
-    """Fuentes de candidatos. Sin `--tune` se usan estos valores; Optuna solo toca `search`."""
+    """Fuentes de candidatos. Sin `--tune` se usan estos valores; Optuna solo toca `search`.
+
+    `two_tower_source` suma el two-tower como sexta fuente. Está apagado por
+    defecto: el serving y el tuneo guardado no lo tienen.
+    """
 
     rrf_cutoff: int = 200
     rrf_k: float = 60.0
@@ -77,8 +81,10 @@ class RetrievalConfig:
             "als": 1.0,
             "bpr": 1.0,
             "tfidf": 0.8,
+            "two_tower": 1.0,
         }
     )
+    two_tower_source: bool = False
     search: RetrievalSearch = field(default_factory=RetrievalSearch)
 
     def __post_init__(self) -> None:
