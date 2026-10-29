@@ -18,6 +18,7 @@ from .data import ITEM_COL, observed_catalog
 from .metrics import (
     ndcg_at_k,
     ndcg_per_user,
+    retrieval_hits,
     retrieval_metrics,
     rows_against_reference,
 )
@@ -516,6 +517,7 @@ def _evaluate(
         _stamp_frame(top20).to_csv(
             artifacts / "evaluation_recommendations.csv", index=False
         )
+        _write_retrieval_hits(artifacts, model, split)
         trained = getattr(model, "trained", None)
         if isinstance(trained, TrainedPipeline):
             _stamp_frame(pd.DataFrame(trained.fold_metrics)).to_csv(
@@ -530,6 +532,18 @@ def _evaluate(
             joblib.dump(trained, artifacts / "evaluated_pipeline.joblib")
     trained = getattr(model, "trained", None)
     return report, trained if isinstance(trained, TrainedPipeline) else None
+
+
+def _write_retrieval_hits(artifacts: Path, model: object, split: SplitData) -> None:
+    """Guarda, por libro de test, si el retrieval lo trajo. Borra el archivo viejo si no aplica."""
+
+    path = artifacts / "evaluation_retrieval_hits.csv"
+    fused = getattr(model, "fused", None)
+    if fused is None:
+        if path.is_file():
+            path.unlink()
+        return
+    _stamp_frame(retrieval_hits(fused.candidates, split.test)).to_csv(path, index=False)
 
 
 def _retrieval_of(model: object, split: SplitData) -> tuple[float, float, int]:

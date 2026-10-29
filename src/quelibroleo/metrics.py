@@ -108,6 +108,24 @@ class RetrievalMetrics:
     mean_candidates: float
 
 
+def retrieval_hits(candidates: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
+    """Una fila por libro de test: ``in_retrieval`` es 1 si entró a candidatos.
+
+    Alcanza para el recall y para el oracle. No guarda el resto del pool.
+    """
+
+    truth_rows = truth.groupby([USER_COL, ITEM_COL], as_index=False)[RATING_COL].max()
+    truth_rows[USER_COL] = truth_rows[USER_COL].astype(str)
+    truth_rows[ITEM_COL] = truth_rows[ITEM_COL].astype(str)
+    pool = candidates[[USER_COL, ITEM_COL]].drop_duplicates().copy()
+    pool[USER_COL] = pool[USER_COL].astype(str)
+    pool[ITEM_COL] = pool[ITEM_COL].astype(str)
+    pool["in_retrieval"] = 1
+    merged = truth_rows.merge(pool, on=[USER_COL, ITEM_COL], how="left")
+    merged["in_retrieval"] = merged["in_retrieval"].fillna(0).astype(int)
+    return merged[[USER_COL, ITEM_COL, RATING_COL, "in_retrieval"]]
+
+
 def retrieval_metrics(
     candidates: pd.DataFrame,
     truth: pd.DataFrame,

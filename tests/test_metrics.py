@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from quelibroleo.metrics import ndcg_at_k, retrieval_metrics, rows_against_reference
+from quelibroleo.metrics import (
+    ndcg_at_k,
+    retrieval_hits,
+    retrieval_metrics,
+    rows_against_reference,
+)
 
 
 def test_ndcg_penalizes_relevant_items_not_retrieved() -> None:
@@ -48,6 +53,10 @@ def test_retrieval_metrics_report_binary_weighted_and_oracle() -> None:
         }
     )
     metrics = retrieval_metrics(candidates, truth)
+
+    hits = retrieval_hits(candidates, truth)
+    marked = dict(zip(hits["id_libro"], hits["in_retrieval"], strict=True))
+    assert marked == {"high": 1, "low": 0}
 
     assert metrics.recall == 0.5
     assert metrics.weighted_recall == 10 / 12

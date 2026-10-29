@@ -90,6 +90,14 @@ Top-20 producido para cada usuario del holdout, con `id_lector`, `id_libro`,
 rating entre 1 y 10. Este archivo no es la entrega; `submission.csv` se genera
 después de reentrenar con todo el historial.
 
+## `evaluation_retrieval_hits.csv`
+
+Una fila por libro de test del hold-out, no por candidato. `in_retrieval` es 1
+si ese libro entró al conjunto que ve el ranker y 0 si no. Con eso se separa
+una falla de retrieval de una de ranking sin guardar las listas completas.
+`diagnostico.py` lo lee junto con el top-20. Solo lo escribe `two_stage`; una
+corrida de una etapa borra el archivo de la evaluación anterior.
+
 ## `data_quality.json`
 
 Auditoría de la carga. La fecha inválida queda fuera del entrenamiento y de la
