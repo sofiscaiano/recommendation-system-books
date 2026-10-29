@@ -2,7 +2,8 @@
 
 Lee el top-20 de ``artifacts/evaluation_recommendations.csv`` y, si la
 evaluación lo guardó, ``evaluation_retrieval_hits.csv`` (1 si el libro de test
-entró a candidatos). No reentrena nada.
+entró a candidatos). No reentrena nada. La tabla baja del hold-out a
+``ejemplo.csv`` y al resto, y dentro de cada uno parte por historial, autor y género.
 
 ``pierde_retrieval`` es ``1 - oracle``: NDCG que no existe porque el libro no
 entró a candidatos. ``pierde_ranking`` es ``oracle - ndcg``: NDCG que el ranker
@@ -29,7 +30,7 @@ from quelibroleo.split_data import load_split
 ROOT = Path(__file__).resolve().parent
 ARTIFACTS = ROOT / "artifacts"
 POBLACION = ("ejemplo.csv", "resto del hold-out")
-AUTORES = ("no repite autores", "repite algunos", "repite la mayoría")
+REPETICION = ("no repite", "repite algunos", "repite la mayoría")
 
 
 def user_metrics(
@@ -64,50 +65,89 @@ def user_metrics(
             "en_candidatos": retrieved,
             "en_top": en_top.to_numpy(dtype=float),
             "n_lecturas": _history_size(history).reindex(users, fill_value=0).to_numpy(dtype=float),
-            "fraccion_autor": _author_repeat(history, test, books).reindex(users, fill_value=0.0).to_numpy(),
+            "fraccion_autor": _repeat(history, test, books, "autor").reindex(users, fill_value=0.0).to_numpy(),
+            "fraccion_genero": _repeat(history, test, books, "genero").reindex(users, fill_value=0.0).to_numpy(),
         }
     )
     frame["poblacion"] = np.where(frame[USER_COL].isin(ejemplo), POBLACION[0], POBLACION[1])
     frame["historial"] = _history_band(frame["n_lecturas"])
-    frame["autores"] = _author_band(frame["fraccion_autor"])
+    frame["autores"] = _repeat_band(frame["fraccion_autor"])
+    frame["generos"] = _repeat_band(frame["fraccion_genero"])
     return frame
 
 
-def summarize(frame: pd.DataFrame, column: str) -> pd.DataFrame:
-    """Promedios del grupo. Con retrieval, las dos pérdidas suman ``1 - ndcg``."""
+def _metrics(part: pd.DataFrame, grupo: str) -> dict[str, object]:
+    """Promedios de un corte. Con retrieval, las dos pérdidas suman ``1 - ndcg``."""
 
-    has_retrieval = frame["oracle"].notna().all()
-    rows = []
-    for name, part in frame.groupby(column, sort=False, observed=True):
-        ndcg = float(part["ndcg"].mean())
-        row = {
-            "grupo": str(name),
-            "usuarios": len(part),
-            "ndcg": ndcg,
-            "en_top": float(part["en_top"].mean()),
-        }
-        if has_retrieval:
-            oracle = float(part["oracle"].mean())
-            row.update(
-                {
-                    "en_candidatos": float(part["en_candidatos"].mean()),
-                    "recall": float(part["recall"].mean()),
-                    "oracle": oracle,
-                    "pierde_retrieval": 1.0 - oracle,
-                    "pierde_ranking": oracle - ndcg,
-                }
-            )
-        rows.append(row)
-    table = pd.DataFrame(rows)
-    if has_retrieval:
-        table["falla"] = np.where(
-            table["pierde_ranking"] >= table["pierde_retrieval"], "ranking", "retrieval"
+    ndcg = float(part["ndcg"].mean())
+    row: dict[str, object] = {
+        "grupo": grupo,
+        "usuarios": len(part),
+        "ndcg": ndcg,
+        "en_top": float(part["en_top"].mean()),
+    }
+    if part["oracle"].notna().all():
+        oracle = float(part["oracle"].mean())
+        lost_retrieval = 1.0 - oracle
+        lost_ranking = oracle - ndcg
+        row.update(
+            {
+                "en_candidatos": float(part["en_candidatos"].mean()),
+                "recall": float(part["recall"].mean()),
+                "oracle": oracle,
+                "pierde_retrieval": lost_retrieval,
+                "pierde_ranking": lost_ranking,
+                "falla": "ranking" if lost_ranking >= lost_retrieval else "retrieval",
+            }
         )
-    return table
+    return row
+
+
+def summarize(frame: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Una fila por valor de ``column``."""
+
+    return pd.DataFrame(
+        [_metrics(part, str(name)) for name, part in frame.groupby(column, sort=False, observed=True)]
+    )
+
+
+def cascade(frame: pd.DataFrame) -> pd.DataFrame:
+    """Hold-out, después ejemplo y resto, y dentro de cada uno historial, autor y género.
+
+    Los rangos de lecturas son los cuartiles del hold-out completo, así el mismo
+    tramo se compara dentro y fuera de ``ejemplo.csv``.
+    """
+
+    rows = [_metrics(frame, "hold-out")]
+    for population in POBLACION:
+        branch = frame[frame["poblacion"] == population]
+        if branch.empty:
+            continue
+        rows.append(_metrics(branch, f"  {population}"))
+        rows.extend(_slices(branch, "historial", "historial", _history_order(frame["historial"])))
+        rows.extend(_slices(branch, "autores", "autores", REPETICION))
+        rows.extend(_slices(branch, "generos", "géneros", REPETICION))
+    return pd.DataFrame(rows)
+
+
+def _slices(
+    branch: pd.DataFrame,
+    column: str,
+    title: str,
+    order: tuple[str, ...] | list[str],
+) -> list[dict[str, object]]:
+    """Filas de un corte, en el orden pedido, saltando las que no tienen lectores."""
+
+    rows = []
+    for label in order:
+        part = branch[branch[column] == label]
+        if not part.empty:
+            rows.append(_metrics(part, f"    {title} · {label}"))
+    return rows
 
 
 def render(frame: pd.DataFrame, *, run_name: str, has_retrieval: bool) -> str:
-    """Texto corto: el promedio y tres cortes de lector."""
+    """Texto corto: la cascada de lectores."""
 
     ndcg = float(frame["ndcg"].mean())
     placed = float(frame["en_top"].mean())
@@ -137,18 +177,10 @@ def render(frame: pd.DataFrame, *, run_name: str, has_retrieval: bool) -> str:
             "Esta evaluación no guardó si cada libro entró al retrieval. "
             "El próximo evaluate escribe artifacts/evaluation_retrieval_hits.csv."
         )
+    lines.append("Los rangos de lecturas son los cuartiles de todo el hold-out.")
     lines.append("")
-    cuts = (
-        ("población", "poblacion", list(POBLACION)),
-        ("historial antes del hold-out", "historial", _history_order(frame["historial"])),
-        ("autores del test ya leídos", "autores", list(AUTORES)),
-    )
-    for title, column, order in cuts:
-        table = _ordered(summarize(frame, column), order)
-        lines.append(title)
-        lines.append(_format(table))
-        lines.append(_worst(table, has_retrieval=has_retrieval))
-        lines.append("")
+    lines.append(_format(cascade(frame)))
+    lines.append("")
     lines.append(f"Corrida {run_name or 'sin nombre'}.")
     return "\n".join(lines).rstrip()
 
@@ -232,18 +264,20 @@ def _history_size(history: pd.DataFrame) -> pd.Series:
     return sized.groupby(USER_COL).size()
 
 
-def _author_repeat(history: pd.DataFrame, test: pd.DataFrame, books: pd.DataFrame) -> pd.Series:
-    """Fracción de libros del test cuyo autor ya apareció en la historia."""
+def _repeat(history: pd.DataFrame, test: pd.DataFrame, books: pd.DataFrame, column: str) -> pd.Series:
+    """Fracción de libros del test cuyo autor o género ya apareció en la historia."""
 
-    authors = books[[ITEM_COL, "autor"]].copy()
-    authors[ITEM_COL] = authors[ITEM_COL].astype(str)
-    authors["autor"] = authors["autor"].fillna("").astype(str).str.strip()
-    known = _keys(history)[[USER_COL, ITEM_COL]].merge(authors, on=ITEM_COL, how="left")
-    known = known.loc[known["autor"].ne(""), [USER_COL, "autor"]].drop_duplicates()
+    if column not in books:
+        return pd.Series(dtype=float)
+    attributes = books[[ITEM_COL, column]].copy()
+    attributes[ITEM_COL] = attributes[ITEM_COL].astype(str)
+    attributes[column] = attributes[column].fillna("").astype(str).str.strip()
+    known = _keys(history)[[USER_COL, ITEM_COL]].merge(attributes, on=ITEM_COL, how="left")
+    known = known.loc[known[column].ne(""), [USER_COL, column]].drop_duplicates()
     known["visto"] = 1.0
-    named = _keys(test)[[USER_COL, ITEM_COL]].merge(authors, on=ITEM_COL, how="left")
-    named = named.loc[named["autor"].ne("")]
-    named = named.merge(known, on=[USER_COL, "autor"], how="left")
+    named = _keys(test)[[USER_COL, ITEM_COL]].merge(attributes, on=ITEM_COL, how="left")
+    named = named.loc[named[column].ne("")]
+    named = named.merge(known, on=[USER_COL, column], how="left")
     named["visto"] = named["visto"].fillna(0.0)
     if named.empty:
         return pd.Series(dtype=float)
@@ -256,6 +290,8 @@ def _history_band(counts: pd.Series) -> pd.Series:
     try:
         bands = pd.qcut(counts, 4, duplicates="drop")
     except ValueError:
+        bands = pd.Series(pd.NA, index=counts.index)
+    if bands.isna().all():
         label = f"{int(counts.min())}-{int(counts.max())} lecturas"
         return pd.Series(label, index=counts.index)
     names = {
@@ -265,25 +301,21 @@ def _history_band(counts: pd.Series) -> pd.Series:
     return bands.map(names).astype(str)
 
 
-def _author_band(fraction: pd.Series) -> pd.Series:
-    band = pd.Series(AUTORES[1], index=fraction.index)
-    band = band.mask(fraction <= 0, AUTORES[0])
-    return band.mask(fraction >= 0.5, AUTORES[2])
+def _repeat_band(fraction: pd.Series) -> pd.Series:
+    band = pd.Series(REPETICION[1], index=fraction.index)
+    band = band.mask(fraction <= 0, REPETICION[0])
+    return band.mask(fraction >= 0.5, REPETICION[2])
 
 
 def _history_order(labels: pd.Series) -> list[str]:
-    return sorted(labels.unique(), key=lambda label: int(str(label).split("-", 1)[0]))
-
-
-def _ordered(table: pd.DataFrame, order: list[str]) -> pd.DataFrame:
-    present = [name for name in order if name in set(table["grupo"])]
-    extra = [name for name in table["grupo"] if name not in present]
-    ranking = {name: index for index, name in enumerate(present + extra)}
-    return table.sort_values("grupo", key=lambda column: column.map(ranking))
+    usable = [label for label in labels.dropna().unique() if str(label).split("-", 1)[0].isdigit()]
+    return sorted(usable, key=lambda label: int(str(label).split("-", 1)[0]))
 
 
 def _format(table: pd.DataFrame) -> str:
     show = table.copy()
+    labels = show["grupo"].astype(str)
+    show["grupo"] = labels.str.ljust(int(labels.str.len().max()))
     for column in ("ndcg", "recall", "oracle", "pierde_retrieval", "pierde_ranking"):
         if column in show:
             show[column] = show[column].map(lambda value: f"{value:.3f}")
@@ -298,17 +330,6 @@ def _format(table: pd.DataFrame) -> str:
             "pierde_ranking": "pierde_rank",
         }
     ).to_string(index=False)
-
-
-def _worst(table: pd.DataFrame, *, has_retrieval: bool) -> str:
-    row = table.loc[table["ndcg"].idxmin()]
-    text = f"Peor: {row['grupo']} ({int(row['usuarios'])} lectores, ndcg {row['ndcg']:.3f})."
-    if has_retrieval:
-        text += (
-            f" Pierde {row['pierde_retrieval']:.3f} en retrieval"
-            f" y {row['pierde_ranking']:.3f} en ranking."
-        )
-    return text
 
 
 def _evaluation_run_name() -> str:
