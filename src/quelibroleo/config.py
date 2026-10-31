@@ -62,11 +62,11 @@ class RetrievalSearch:
 
 @dataclass(frozen=True)
 class RetrievalConfig:
-    """Fuentes de candidatos. El corte y los pesos salen del último `--tune`.
+    """Fuentes de candidatos. El corte y los pesos salen de un `--tune` con esta config.
 
-    Optuna recorre `search`. Sin `--tune`, la corrida lee
-    `artifacts/tuned_hyperparameters.json`. Si ese archivo no existe, hay que
-    correr `evaluate --tune` antes: esta clase no guarda un corte ni unos
+    Optuna recorre `search`. Sin `--tune`, la corrida busca en
+    `artifacts/tuning_history.json` una entrada con la misma config. Si no hay,
+    hay que correr `evaluate --tune`: esta clase no guarda un corte ni unos
     pesos para usar por descuido.
 
     Cada `*_source` decide si esa fuente se entrena. Un peso del tuneo solo

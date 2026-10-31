@@ -70,17 +70,19 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 
 `--tune-on-example-users` hace que ese study y el early stopping del último fold puntúen solo los lectores de `ejemplo.csv`. El ranker sigue entrenando con todos. Sin el flag se usa `PipelineConfig.tune_on_example_users`, prendido por defecto. Otro `--artifacts` evita pisar el JSON del tuneo sobre el fold completo.
 
-`evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
-El de `ease` escribe `artifacts/ease_hyperparameters.json`. Cada modelo
-reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro.
-`two_stage` no tiene corte ni pesos fijos: sin ese JSON hay que correr
-`evaluate --tune` antes. `ease`, si no tiene archivo, usa los valores de
-`EaseConfig`.
+`evaluate --tune` de `two_stage` agrega una entrada a
+`artifacts/tuning_history.json` y copia la última en
+`artifacts/tuned_hyperparameters.json`. Sin `--tune` reutiliza la entrada
+cuya config coincide (fuentes, `label_gain`, semilla, split, `rrf_k` y el
+resto de lo que el study no elige). Si no hay ninguna, hay que correr
+`evaluate --tune`. El de `ease` escribe `artifacts/ease_hyperparameters.json`
+y, si no tiene archivo, usa los valores de `EaseConfig`. Una corrida no pisa
+ni lee el archivo del otro modelo.
 
 `--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra
-a Optuna. Cambiarla exige buscar de nuevo, porque el archivo guardado se eligió
-con la ganancia anterior:
+a Optuna. Cambiarla exige buscar de nuevo: el tuneo guardado se eligió
+con la ganancia anterior, y otra config no lo reutiliza:
 
 ```bash
 uv run python main.py evaluate --tune --label-gain exponential --note "label_gain exponencial alineado con el NDCG"
@@ -92,8 +94,8 @@ Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
 único (`fecha-modelo-comando-modo-sufijo`). El tag `model` es el algoritmo
 (`two_stage`, `popularity` o `ease`). El modo es `tune` si busca, `tuned` si
-reutiliza el archivo de ese modelo y `fixed` si ese modelo usa valores fijos
-(`ease` sin JSON, o `two_tower`). `two_stage` sin JSON no arranca. Ese
+reutiliza un tuneo de la misma config y `fixed` si ese modelo usa valores fijos
+(`ease` sin JSON, o `two_tower`). `two_stage` sin un tuneo de esa config no arranca. Ese
 nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
 cambia de columnas. Cada `submit` copia esa entrega a `submissions/{run_name}/`
@@ -154,8 +156,8 @@ el del hold-out completo y el de popularidad en esos mismos grupos.
 Los artefactos de evaluación se escriben en `artifacts/`; la entrega final se
 genera en `submission.csv`. Cada corrida también deja el log en
 `artifacts/run.log`. Con `--tune`, los hiperparámetros elegidos por Optuna
-quedan en `artifacts/tuned_hyperparameters.json` y las entregas posteriores los
-reutilizan. La definición de cada archivo
+quedan en `artifacts/tuning_history.json`. Una entrega posterior reutiliza
+la entrada de esa misma config, no necesariamente la última búsqueda. La definición de cada archivo
 y métrica está en [`docs/evaluacion.md`](docs/evaluacion.md). `data.db` siempre
 se abre en modo de solo lectura.
 

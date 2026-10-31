@@ -33,8 +33,8 @@ TuneOption = Annotated[
     typer.Option(
         "--tune",
         help=(
-            "Busca con Optuna. Sin este flag se reutiliza el último tuneo; "
-            "si no hay archivo, two_stage pide correr --tune antes"
+            "Busca con Optuna y lo agrega al historial. Sin este flag, two_stage "
+            "reutiliza un tuneo de la misma config; si no hay, pide correr --tune"
         ),
     ),
 ]

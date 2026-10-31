@@ -138,19 +138,26 @@ la última. La carpeta también queda como artefacto de esa corrida en MLflow.
 Parámetros con los que arrancó la ejecución: semilla, corte de RRF,
 pesos y configuración de LightGBM. Son los valores de `PipelineConfig`.
 Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
-`tuned_hyperparameters.json`.
+`tuning_history.json`.
+
+## `tuning_history.json`
+
+Lista de cada `evaluate --tune` de `two_stage`. Cada entrada guarda la config
+con la que se buscó (fuentes, `label_gain`, semilla, split, `rrf_k`, intervalos
+de búsqueda y, si esa fuente está prendida, el two-tower), el corte de RRF,
+los pesos normalizados y LambdaRank. No se reemplazan las entradas anteriores.
+
+Sin `--tune`, `evaluate` y `submit` recorren la lista y entrenan con la última
+entrada de la misma config. Si no hay ninguna, la corrida pide `--tune`. Un
+`tuned_hyperparameters.json` anterior a este historial no guardó la config:
+entra como primera entrada y coincide solo en `label_gain`,
+`tune_on_example_users` y el conjunto de fuentes. Una entrada con cuotas por
+fuente no sirve para esta fusión.
 
 ## `tuned_hyperparameters.json`
 
-Solo aparece si la corrida usó `--tune`. Guarda el corte del ranking de RRF,
-los pesos de cada fuente (normalizados para sumar 1), `label_gain` y los
-hiperparámetros de LambdaRank elegidos por Optuna. `label_gain` no se busca:
-queda el valor de esa corrida (`linear` si el archivo es anterior a este campo).
-`evaluate` y `submit` sin `--tune` leen este archivo y entrenan con esos
-valores. Si el `label_gain` de la corrida no coincide con el del archivo, el
-log avisa que hay que volver a buscar. Si no existe, usan la config fija de
-`PipelineConfig`. Un archivo generado con cuotas por fuente no sirve para esta
-fusión. Otra corrida con `--tune` vuelve a buscar y reemplaza el archivo.
+Copia de la última búsqueda, la misma entrada que se agregó al historial.
+Sirve para mirar ese resultado; la reutilización mira el historial.
 
 ## `run.log`
 

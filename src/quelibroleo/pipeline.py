@@ -31,10 +31,10 @@ from .split_data import (
 )
 from .submission import fill_submission
 from .tuning import (
+    record_tuned_hyperparameters,
     require_tuned_hyperparameters,
     restrict_to_example_users,
     tune_pipeline,
-    tuned_hyperparameters_path,
 )
 from .two_stage.columns import ColumnBuilder, RankerTable, attach_relevance
 from .two_stage.ranker import LambdaRanker
@@ -61,7 +61,8 @@ _TWO_STAGE_DIAGNOSTICS = (
 def clear_foreign_diagnostics(artifacts: Path, model: str) -> None:
     """Quita diagnósticos de two_stage cuando corre otro modelo.
 
-    No borra ``tuned_hyperparameters.json``: two_stage lo vuelve a usar.
+    No borra ``tuned_hyperparameters.json`` ni ``tuning_history.json``:
+    two_stage vuelve a buscar ahí un tuneo de la misma config.
     """
 
     if model == "two_stage":
@@ -351,27 +352,12 @@ def train_ranker_from_history(
         LOGGER.info("LambdaRank final entrenado; se omiten ablaciones repetidas")
 
     if tune:
-        tuned_path = tuned_hyperparameters_path(config.artifacts_dir)
-        tuned_path.parent.mkdir(parents=True, exist_ok=True)
-        from .tracking import with_run_name
-
-        tuned_path.write_text(
-            json.dumps(
-                with_run_name(
-                    {
-                        "rrf_cutoff": cutoff,
-                        "source_weights": weights,
-                        "label_gain": config.ranker.label_gain,
-                        "tune_on_example_users": config.tune_on_example_users,
-                        "ranker": overrides,
-                    }
-                ),
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        record_tuned_hyperparameters(
+            config,
+            rrf_cutoff=cutoff,
+            weights=weights,
+            ranker=overrides,
         )
-        LOGGER.info("Hiperparámetros de Optuna guardados en %s", tuned_path)
 
     fold_metrics = []
     for material, (features, fused) in zip(materials, built, strict=True):

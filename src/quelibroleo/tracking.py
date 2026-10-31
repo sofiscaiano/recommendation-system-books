@@ -18,7 +18,7 @@ from typing import Any
 
 from .config import PipelineConfig
 from .pipeline import EvaluationReport
-from .tuning import has_saved_hyperparameters
+from .tuning import has_matching_tuned_hyperparameters
 
 EXPERIMENT_NAME = "quelibroleo"
 _SUMMARY_ARTIFACTS = (
@@ -31,6 +31,7 @@ _SUMMARY_ARTIFACTS = (
 _MODEL_ARTIFACTS = {
     "two_stage": (
         "tuned_hyperparameters.json",
+        "tuning_history.json",
         "retrieval_folds.csv",
         "feature_ablations.csv",
         "feature_importance.csv",
@@ -68,7 +69,7 @@ def _reuses_saved_file(config: PipelineConfig) -> bool:
         return has_saved_ease_hyperparameters(config.artifacts_dir)
     if config.model == "two_tower":
         return False
-    return has_saved_hyperparameters(config.artifacts_dir)
+    return has_matching_tuned_hyperparameters(config)
 
 
 def active_run_name() -> str:

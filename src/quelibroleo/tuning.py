@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from .two_stage.retrieval import CandidateFusion
 
 LOGGER = logging.getLogger(__name__)
 TUNED_HYPERPARAMETERS_FILE = "tuned_hyperparameters.json"
+TUNING_HISTORY_FILE = "tuning_history.json"
 
 
 @dataclass(frozen=True)
@@ -45,15 +46,62 @@ class TunedHyperparameters:
 
 
 def tuned_hyperparameters_path(artifacts_dir: Path) -> Path:
-    """Ruta del tuneo guardado por `evaluate --tune`."""
+    """Ruta del último tuneo escrito por `evaluate --tune`."""
 
     return Path(artifacts_dir) / TUNED_HYPERPARAMETERS_FILE
 
 
-def has_saved_hyperparameters(artifacts_dir: Path) -> bool:
-    """Indica si hay un tuneo previo para reutilizar."""
+def tuning_history_path(artifacts_dir: Path) -> Path:
+    """Ruta del historial de tuneos de two_stage."""
 
-    return tuned_hyperparameters_path(artifacts_dir).is_file()
+    return Path(artifacts_dir) / TUNING_HISTORY_FILE
+
+
+def has_saved_hyperparameters(artifacts_dir: Path) -> bool:
+    """Indica si hay historial o el JSON suelto de un tuneo anterior."""
+
+    directory = Path(artifacts_dir)
+    return tuning_history_path(directory).is_file() or tuned_hyperparameters_path(directory).is_file()
+
+
+def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
+    """Config que define un tuneo de two_stage, sin los valores que Optuna elige.
+
+    No entran la nota, la carpeta de artefactos ni la ruta de la entrega: no
+    cambian el study. `example_path` entra solo si el objetivo usa esos lectores.
+    El two-tower entra solo si es una fuente.
+    """
+
+    retrieval = config.retrieval
+    ranker = config.ranker
+    fingerprint: dict[str, Any] = {
+        "random_seed": config.random_seed,
+        "optuna_trials": config.optuna_trials,
+        "tune_on_example_users": config.tune_on_example_users,
+        "db_path": str(config.db_path),
+        "example_path": (
+            str(config.example_path) if config.tune_on_example_users else None
+        ),
+        "split": asdict(config.split),
+        "retrieval": {
+            "rrf_k": retrieval.rrf_k,
+            "recency_half_life_days": retrieval.recency_half_life_days,
+            "implicit_factors": retrieval.implicit_factors,
+            "implicit_iterations": retrieval.implicit_iterations,
+            "tfidf_max_features": retrieval.tfidf_max_features,
+            "sources": list(retrieval.enabled_sources()),
+            "search": asdict(retrieval.search),
+        },
+        "ranker": {
+            "n_estimators": ranker.n_estimators,
+            "early_stopping_rounds": ranker.early_stopping_rounds,
+            "label_gain": ranker.label_gain,
+            "search": asdict(ranker.search),
+        },
+    }
+    if retrieval.two_tower_source:
+        fingerprint["two_tower"] = asdict(config.two_tower)
+    return fingerprint
 
 
 def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
@@ -63,6 +111,170 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"No se pudo leer {path}") from exc
+    return _parse_tuned_payload(payload, path)
+
+
+def record_tuned_hyperparameters(
+    config: PipelineConfig,
+    *,
+    rrf_cutoff: int,
+    weights: dict[str, float],
+    ranker: dict[str, Any],
+) -> None:
+    """Agrega este tuneo al historial y deja una copia en el JSON suelto."""
+
+    from .tracking import with_run_name
+
+    directory = Path(config.artifacts_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = with_run_name(
+        {
+            "config": two_stage_tuning_fingerprint(config),
+            "config_complete": True,
+            "rrf_cutoff": rrf_cutoff,
+            "source_weights": weights,
+            "label_gain": config.ranker.label_gain,
+            "tune_on_example_users": config.tune_on_example_users,
+            "ranker": ranker,
+        }
+    )
+    history_path = tuning_history_path(directory)
+    if history_path.is_file():
+        entries = _read_history_list(history_path)
+    else:
+        entries = _legacy_entries(directory)
+    entries.append(payload)
+    _write_history(history_path, entries)
+    tuned_path = tuned_hyperparameters_path(directory)
+    tuned_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    LOGGER.info("Hiperparámetros de Optuna guardados en %s", history_path)
+
+
+def has_matching_tuned_hyperparameters(config: PipelineConfig) -> bool:
+    """True si el historial tiene un tuneo de esta misma config."""
+
+    try:
+        return _find_saved_tuning(config, persist_legacy=False) is not None
+    except ValueError:
+        return False
+
+
+def require_tuned_hyperparameters(config: PipelineConfig) -> TunedHyperparameters:
+    """Busca en el historial un tuneo con esta config. Si no hay, pide `--tune`."""
+
+    path = tuning_history_path(config.artifacts_dir)
+    loaded = _find_saved_tuning(config, persist_legacy=True)
+    if loaded is None:
+        raise ValueError(
+            f"No hay un tuneo con esta config en {path}. "
+            "Corré evaluate --tune antes de una corrida sin --tune."
+        )
+    LOGGER.info(
+        "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s, tune_on_example_users=%s)",
+        path,
+        loaded.run_name or "sin nombre",
+        loaded.rrf_cutoff,
+        loaded.label_gain,
+        loaded.tune_on_example_users,
+    )
+    return loaded
+
+
+def _find_saved_tuning(
+    config: PipelineConfig,
+    *,
+    persist_legacy: bool,
+) -> TunedHyperparameters | None:
+    """Última entrada del historial cuya config coincide. None si no hay ninguna."""
+
+    directory = Path(config.artifacts_dir)
+    history_path = tuning_history_path(directory)
+    if history_path.is_file():
+        entries = _read_history_list(history_path)
+    else:
+        entries = _legacy_entries(directory)
+        if persist_legacy and entries:
+            _write_history(history_path, entries)
+    matched = [entry for entry in entries if _same_tuning_config(entry, config)]
+    if not matched:
+        return None
+    return _parse_tuned_payload(matched[-1], history_path)
+
+
+def _same_tuning_config(entry: dict[str, Any], config: PipelineConfig) -> bool:
+    """True si esa entrada se tuneó con la misma config que esta corrida.
+
+    Un JSON anterior a este historial no guardó la config. Coincide solo en
+    `label_gain`, `tune_on_example_users` y el conjunto de fuentes.
+    """
+
+    stored = entry.get("config")
+    if entry.get("config_complete") is True and isinstance(stored, dict):
+        return _canonical(stored) == _canonical(two_stage_tuning_fingerprint(config))
+    weights = entry.get("source_weights")
+    sources = entry.get("sources")
+    if not isinstance(sources, list):
+        if not isinstance(weights, dict):
+            return False
+        sources = list(weights)
+    label_gain = entry.get("label_gain", "linear")
+    population = entry.get("tune_on_example_users", False)
+    return (
+        label_gain == config.ranker.label_gain
+        and population is config.tune_on_example_users
+        and set(sources) == set(config.retrieval.enabled_sources())
+    )
+
+
+def _canonical(value: Any) -> Any:
+    """Normaliza un diccionario por JSON para comparar fingerprints."""
+
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
+def _read_history_list(path: Path) -> list[dict[str, Any]]:
+    """Lee la lista de tuneos. Falla si el archivo no es esa lista."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"No se pudo leer {path}") from exc
+    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+        raise ValueError(f"Hiperparámetros inválidos en {path}")
+    return payload
+
+
+def _legacy_entries(artifacts_dir: Path) -> list[dict[str, Any]]:
+    """El JSON suelto, si existe, como única entrada previa al historial."""
+
+    path = tuned_hyperparameters_path(artifacts_dir)
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"No se pudo leer {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Hiperparámetros inválidos en {path}")
+    return [payload]
+
+
+def _write_history(path: Path, entries: list[dict[str, Any]]) -> None:
+    """Escribe el historial completo."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(entries, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _parse_tuned_payload(payload: Any, path: Path) -> TunedHyperparameters:
+    """Valida un objeto de tuneo. `path` solo entra en el mensaje de error."""
+
     if isinstance(payload, dict) and "source_quotas" in payload:
         raise ValueError(
             f"{path} ajusta cuotas por fuente. "
@@ -98,44 +310,6 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         label_gain=label_gain,
         tune_on_example_users=tune_on_example_users,
     )
-
-
-def require_tuned_hyperparameters(config: PipelineConfig) -> TunedHyperparameters:
-    """Lee el último tuneo. Si no hay archivo, pide un `evaluate --tune`."""
-
-    path = tuned_hyperparameters_path(config.artifacts_dir)
-    if not path.is_file():
-        raise ValueError(
-            f"No hay hiperparámetros tuneados en {path}. "
-            "Corré evaluate --tune antes de una corrida sin --tune."
-        )
-    loaded = load_tuned_hyperparameters(path)
-    LOGGER.info(
-        "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s, tune_on_example_users=%s)",
-        path,
-        loaded.run_name or "sin nombre",
-        loaded.rrf_cutoff,
-        loaded.label_gain,
-        loaded.tune_on_example_users,
-    )
-    if loaded.label_gain != config.ranker.label_gain:
-        LOGGER.warning(
-            "El tuneo guardado se eligió con label_gain=%s y esta corrida usa %s. "
-            "Esos hiperparámetros no corresponden a esta ganancia; "
-            "corré evaluate --tune --label-gain %s.",
-            loaded.label_gain,
-            config.ranker.label_gain,
-            config.ranker.label_gain,
-        )
-    if loaded.tune_on_example_users != config.tune_on_example_users:
-        LOGGER.warning(
-            "El tuneo guardado se eligió con tune_on_example_users=%s y esta corrida usa %s. "
-            "Esos hiperparámetros no corresponden a esta población; "
-            "corré evaluate --tune de nuevo.",
-            loaded.tune_on_example_users,
-            config.tune_on_example_users,
-        )
-    return loaded
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:

@@ -74,7 +74,7 @@ Fuentes, fusionadas con Reciprocal Rank Fusion ponderado (`k = 60`, fijo):
 | BPR | Mismo matriz; optimiza orden, no el valor de la confianza |
 | TF-IDF | Coseno entre el perfil de texto del lector y cada libro |
 
-No hay pesos ni corte fijos: salen del último `evaluate --tune` y quedan en `artifacts/tuned_hyperparameters.json`. Sin ese archivo, `two_stage` pide correr `--tune` y no arranca.
+No hay pesos ni corte fijos: salen de un `evaluate --tune` con la misma config y quedan en `artifacts/tuning_history.json`. Sin una entrada que coincida, `two_stage` pide correr `--tune` y no arranca.
 
 No hay cupos por fuente. El corte (`rrf_cutoff`) se aplica al ranking ya fusionado. Cada fuente se lee más profundo que ese corte. La recencia usa semivida de 365 días.
 
@@ -95,11 +95,11 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 | Modo | Cuándo | Qué entrena |
 | --- | --- | --- |
-| `fixed` | `ease` sin su JSON, o `two_tower` | Valores fijos de ese modelo. `two_stage` no entra acá: sin JSON no arranca |
-| `tuned` | Existe ese archivo y no se pasa `--tune` | El JSON guardado |
-| `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que reemplaza el JSON de ese modelo |
+| `fixed` | `ease` sin su JSON, o `two_tower` | Valores fijos de ese modelo. `two_stage` no entra acá: sin un tuneo de esa config no arranca |
+| `tuned` | Hay un tuneo de esa config y no se pasa `--tune` | Esa entrada del historial |
+| `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que agrega una entrada al historial de ese modelo |
 
-`two_stage` guarda `artifacts/tuned_hyperparameters.json`. Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. El objetivo es el NDCG@20 de todos los lectores del último fold. Con `tune_on_example_users` o `--tune-on-example-users`, ese objetivo y el early stopping miran solo los de `ejemplo.csv`; el entrenamiento del ranker no cambia. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
+`two_stage` agrega cada búsqueda a `artifacts/tuning_history.json` y copia la última en `artifacts/tuned_hyperparameters.json`. Sin `--tune` usa la entrada cuya config coincide, no la última si esa config es otra. Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. El objetivo es el NDCG@20 de todos los lectores del último fold. Con `tune_on_example_users` o `--tune-on-example-users`, ese objetivo y el early stopping miran solo los de `ejemplo.csv`; el entrenamiento del ranker no cambia. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 

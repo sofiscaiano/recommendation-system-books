@@ -63,14 +63,31 @@ def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
 
 
 def test_run_name_marks_reused_hyperparameters(tmp_path, monkeypatch) -> None:
+    import json
+
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'mlflow.db'}")
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
-    (artifacts / "tuned_hyperparameters.json").write_text("{}", encoding="utf-8")
+    config = PipelineConfig(run_note="reuso del tuneo", artifacts_dir=artifacts)
+    (artifacts / "tuned_hyperparameters.json").write_text(
+        json.dumps(
+            {
+                "run_name": "prev",
+                "rrf_cutoff": 200,
+                "source_weights": {
+                    name: 1.0 for name in config.retrieval.enabled_sources()
+                },
+                "ranker": {"learning_rate": 0.04},
+                "label_gain": config.ranker.label_gain,
+                "tune_on_example_users": config.tune_on_example_users,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     with track_command(
         "submit",
-        PipelineConfig(run_note="reuso del tuneo", artifacts_dir=artifacts),
+        config,
         tune=False,
     ):
         run_name = mlflow.active_run().info.run_name
