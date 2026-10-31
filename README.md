@@ -40,7 +40,7 @@ uv run python main.py evaluate --note "qué se está probando"
 uv run python main.py submit --note "qué se está entregando"
 ```
 
-El algoritmo se elige con `--model`. El corte no: train, los tres folds de
+El algoritmo es `PipelineConfig.model`. `--model` lo pisa en esa corrida. El corte no: train, los tres folds de
 validación y el test de las últimas 20 salen de `split_data.py` para
 cualquier modelo. `submit` reentrena con toda la historia y escribe el mismo
 `submission.csv`.

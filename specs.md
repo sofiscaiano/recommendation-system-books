@@ -121,7 +121,7 @@ uv run python main.py evaluate --tune --label-gain exponential --two-tower-sourc
 uv run python main.py export-serving
 ```
 
-`--model` elige el algoritmo (`two_stage`, `popularity`, `ease` o `two_tower`). Train, folds de
+`PipelineConfig.model` elige el algoritmo (`two_stage`, `popularity`, `ease` o `two_tower`). `--model` lo pisa en esa corrida. `PipelineConfig.random_seed` es la semilla; `--seed` la pisa. Train, folds de
 validación y test salen siempre de `split_data.py`. La entrega sigue siendo
 `submission.csv` con los lectores de `ejemplo.csv`. Un modelo nuevo solo
 implementa `fit` y `recommend`; no tiene que separar retrieval y ranking.

@@ -38,7 +38,13 @@ TuneOption = Annotated[
         ),
     ),
 ]
-SeedOption = Annotated[int, typer.Option("--seed")]
+SeedOption = Annotated[
+    int | None,
+    typer.Option(
+        "--seed",
+        help="Semilla. Sin el flag se usa PipelineConfig.random_seed",
+    ),
+]
 NoteOption = Annotated[
     str,
     typer.Option(
@@ -78,10 +84,13 @@ TuneOnExampleUsersOption = Annotated[
     ),
 ]
 ModelOption = Annotated[
-    str,
+    str | None,
     typer.Option(
         "--model",
-        help="Algoritmo: two_stage, popularity, ease o two_tower. El corte train/val/test no cambia",
+        help=(
+            "Algoritmo: two_stage, popularity, ease o two_tower. "
+            "Sin el flag se usa PipelineConfig.model. El corte train/val/test no cambia"
+        ),
     ),
 ]
 
@@ -106,10 +115,10 @@ def _config(
     example: Path,
     output: Path,
     artifacts: Path,
-    seed: int,
+    seed: int | None,
     note: str,
     label_gain: str | None,
-    model: str,
+    model: str | None,
     two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> PipelineConfig:
@@ -128,12 +137,14 @@ def _config(
         example_path=example,
         output_path=output,
         artifacts_dir=artifacts,
-        random_seed=seed,
         run_note=note,
-        model=model,
         ranker=ranker,
         retrieval=retrieval,
     )
+    if seed is not None:
+        config = replace(config, random_seed=seed)
+    if model is not None:
+        config = replace(config, model=model)
     if tune_on_example_users is None:
         return config
     return replace(config, tune_on_example_users=tune_on_example_users)
@@ -147,10 +158,10 @@ def _run(
     output: Path,
     artifacts: Path,
     tune: bool,
-    seed: int,
+    seed: int | None,
     note: str,
     label_gain: str | None,
-    model: str,
+    model: str | None,
     two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> None:
@@ -172,10 +183,11 @@ def _run(
         tune_on_example_users,
     )
     logging.getLogger(__name__).info(
-        "Comando %s (model=%s, tune=%s, label_gain=%s, tune_on_example_users=%s). Log en %s",
+        "Comando %s (model=%s, tune=%s, seed=%s, label_gain=%s, tune_on_example_users=%s). Log en %s",
         command,
-        model,
+        config.model,
         tune,
+        config.random_seed,
         config.ranker.label_gain,
         config.tune_on_example_users,
         artifacts / "run.log",
@@ -196,10 +208,10 @@ def main(
     output: OutputOption = Path("submission.csv"),
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
-    seed: SeedOption = 42,
+    seed: SeedOption = None,
     note: NoteOption = "",
     label_gain: LabelGainOption = None,
-    model: ModelOption = "two_stage",
+    model: ModelOption = None,
 ) -> None:
     """Sin subcomando, evalúa. two_stage reutiliza el último tuneo."""
 
@@ -225,10 +237,10 @@ def evaluate(
     output: OutputOption = Path("submission.csv"),
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
-    seed: SeedOption = 42,
+    seed: SeedOption = None,
     note: NoteOption = ...,
     label_gain: LabelGainOption = None,
-    model: ModelOption = "two_stage",
+    model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
@@ -257,10 +269,10 @@ def submit(
     output: OutputOption = Path("submission.csv"),
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
-    seed: SeedOption = 42,
+    seed: SeedOption = None,
     note: NoteOption = ...,
     label_gain: LabelGainOption = None,
-    model: ModelOption = "two_stage",
+    model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
@@ -289,10 +301,10 @@ def run_all(
     output: OutputOption = Path("submission.csv"),
     artifacts: ArtifactsOption = Path("artifacts"),
     tune: TuneOption = False,
-    seed: SeedOption = 42,
+    seed: SeedOption = None,
     note: NoteOption = ...,
     label_gain: LabelGainOption = None,
-    model: ModelOption = "two_stage",
+    model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
@@ -318,7 +330,7 @@ def run_all(
 def export_serving(
     db: DbOption = Path("data.db"),
     artifacts: ArtifactsOption = Path("artifacts"),
-    seed: SeedOption = 42,
+    seed: SeedOption = None,
 ) -> None:
     """Ajusta las fuentes sobre toda la historia y escribe artifacts/serving.joblib."""
 
@@ -327,8 +339,9 @@ def export_serving(
         PipelineConfig(),
         db_path=db,
         artifacts_dir=artifacts,
-        random_seed=seed,
     )
+    if seed is not None:
+        config = replace(config, random_seed=seed)
     destination = export_serving_artifact(config)
     print(f"Artefacto de serving guardado en {destination}")
 
