@@ -182,10 +182,17 @@ def _run(
         two_tower_source,
         tune_on_example_users,
     )
-    logging.getLogger(__name__).info(
-        "Comando %s (model=%s, tune=%s, seed=%s, label_gain=%s, tune_on_example_users=%s). Log en %s",
+    logger = logging.getLogger(__name__)
+    if config.model == "two_stage":
+        logger.info(
+            "Modelo two_stage. Fuentes: %s",
+            ", ".join(config.retrieval.enabled_sources()),
+        )
+    else:
+        logger.info("Modelo %s", config.model)
+    logger.info(
+        "Comando %s (tune=%s, seed=%s, label_gain=%s, tune_on_example_users=%s). Log en %s",
         command,
-        config.model,
         tune,
         config.random_seed,
         config.ranker.label_gain,
