@@ -154,7 +154,9 @@ La búsqueda opcional (`main.py evaluate --tune`) es un solo study de Optuna,
 `PipelineConfig.optuna_trials` trials. Recorre juntos el corte de RRF, un peso
 por fuente y `RankerSearch`. El objetivo es el NDCG@20 del top-20
 de LambdaRank en el último fold rolling, entrenando con los folds anteriores.
-Ese fold también corta el early stopping. El hold-out oficial no entra al
+Ese fold también corta el early stopping. Con `tune_on_example_users` o
+`--tune-on-example-users`, el objetivo y el early stopping usan solo los
+lectores de `ejemplo.csv` que entran a ese fold. El hold-out oficial no entra al
 study. `n_estimators`, `early_stopping_rounds` y `rrf_k` quedan fijos. La
 profundidad de cada fuente sale del corte, de `k` y de la cantidad de fuentes;
 no es otro hiperparámetro. Un trial se descarta si `num_leaves` supera

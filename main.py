@@ -57,6 +57,16 @@ TwoTowerSourceOption = Annotated[
         help="two_stage suma el two-tower como fuente de retrieval. Exige --tune la primera vez",
     ),
 ]
+TuneOnExampleUsersOption = Annotated[
+    bool | None,
+    typer.Option(
+        "--tune-on-example-users/--no-tune-on-example-users",
+        help=(
+            "Optuna y el early stopping del último fold puntúan solo los lectores de --example. "
+            "Sin el flag se usa PipelineConfig.tune_on_example_users, apagado por defecto"
+        ),
+    ),
+]
 ModelOption = Annotated[
     str,
     typer.Option(
@@ -91,11 +101,12 @@ def _config(
     label_gain: str,
     model: str,
     two_tower_source: bool = False,
+    tune_on_example_users: bool | None = None,
 ) -> PipelineConfig:
     """Arma la config de la corrida con las rutas, la nota y el modelo."""
 
     base = PipelineConfig()
-    return replace(
+    config = replace(
         base,
         db_path=db,
         example_path=example,
@@ -107,6 +118,9 @@ def _config(
         ranker=replace(base.ranker, label_gain=label_gain),
         retrieval=replace(base.retrieval, two_tower_source=two_tower_source),
     )
+    if tune_on_example_users is None:
+        return config
+    return replace(config, tune_on_example_users=tune_on_example_users)
 
 
 def _run(
@@ -122,6 +136,7 @@ def _run(
     label_gain: str,
     model: str,
     two_tower_source: bool = False,
+    tune_on_example_users: bool | None = None,
 ) -> None:
     """Ejecuta evaluate, submit o ambos con la misma configuración."""
 
@@ -129,13 +144,23 @@ def _run(
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
     config = _config(
-        db, example, output, artifacts, seed, note, label_gain, model, two_tower_source
+        db,
+        example,
+        output,
+        artifacts,
+        seed,
+        note,
+        label_gain,
+        model,
+        two_tower_source,
+        tune_on_example_users,
     )
     logging.getLogger(__name__).info(
-        "Comando %s (model=%s, tune=%s). Log en %s",
+        "Comando %s (model=%s, tune=%s, tune_on_example_users=%s). Log en %s",
         command,
         model,
         tune,
+        config.tune_on_example_users,
         artifacts / "run.log",
     )
     if command in {"evaluate", "all"}:
@@ -188,6 +213,7 @@ def evaluate(
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = False,
+    tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
 
@@ -203,6 +229,7 @@ def evaluate(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        tune_on_example_users=tune_on_example_users,
     )
 
 
@@ -218,6 +245,7 @@ def submit(
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = False,
+    tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
 
@@ -233,6 +261,7 @@ def submit(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        tune_on_example_users=tune_on_example_users,
     )
 
 
@@ -248,6 +277,7 @@ def run_all(
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = False,
+    tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa y después genera la entrega."""
 
@@ -263,6 +293,7 @@ def run_all(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        tune_on_example_users=tune_on_example_users,
     )
 
 

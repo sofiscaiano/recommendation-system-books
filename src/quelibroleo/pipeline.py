@@ -14,7 +14,7 @@ import pandas as pd
 
 from .baselines import PopularityRecommender
 from .config import PipelineConfig
-from .data import ITEM_COL, observed_catalog
+from .data import ITEM_COL, USER_COL, observed_catalog
 from .metrics import (
     ndcg_at_k,
     ndcg_per_user,
@@ -22,9 +22,20 @@ from .metrics import (
     retrieval_metrics,
     rows_against_reference,
 )
-from .split_data import SplitData, load_split, seen_books, validation_folds
+from .split_data import (
+    SplitData,
+    example_users,
+    load_split,
+    seen_books,
+    validation_folds,
+)
 from .submission import fill_submission
-from .tuning import resolve_saved_or_default, tune_pipeline, tuned_hyperparameters_path
+from .tuning import (
+    resolve_saved_or_default,
+    restrict_to_example_users,
+    tune_pipeline,
+    tuned_hyperparameters_path,
+)
 from .two_stage.columns import ColumnBuilder, RankerTable, attach_relevance
 from .two_stage.ranker import LambdaRanker
 from .two_stage.retrieval import (
@@ -293,11 +304,23 @@ def train_ranker_from_history(
     feature_sets = [features for features, _ in built]
     train_set = _concat_feature_sets(feature_sets[:-1])
     validation_set = feature_sets[-1]
+    ranker_validation = validation_set
+    if config.tune_on_example_users:
+        ranker_validation, example_target = restrict_to_example_users(
+            validation_set,
+            materials[-1].target,
+            example_users(config),
+        )
+        LOGGER.info(
+            "El early stopping del último fold usa %s lectores de %s",
+            example_target[USER_COL].nunique(),
+            config.example_path,
+        )
     ranker = LambdaRanker(
         config.ranker,
         random_state=config.random_seed,
         overrides=overrides,
-    ).fit(train_set, validation_set)
+    ).fit(train_set, ranker_validation)
     ablation_metrics: list[dict[str, object]] = []
     if execute_ablations:
         LOGGER.info("LambdaRank principal entrenado; ejecutando ablaciones")
@@ -355,6 +378,7 @@ def train_ranker_from_history(
                         "rrf_cutoff": cutoff,
                         "source_weights": weights,
                         "label_gain": config.ranker.label_gain,
+                        "tune_on_example_users": config.tune_on_example_users,
                         "ranker": overrides,
                     }
                 ),

@@ -226,7 +226,12 @@ class RankerConfig:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Configuración raíz del pipeline."""
+    """Configuración raíz del pipeline.
+
+    `tune_on_example_users` limita el NDCG@20 de Optuna y el early stopping
+    del último fold a los lectores de `example_path`. El ranker sigue
+    entrenando con todos los folds. Apagado, ese fold completo define ambos.
+    """
 
     db_path: Path = Path("data.db")
     example_path: Path = Path("ejemplo.csv")
@@ -236,6 +241,7 @@ class PipelineConfig:
     run_note: str = ""
     model: str = "two_stage"
     optuna_trials: int = 30
+    tune_on_example_users: bool = False
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)

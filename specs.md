@@ -99,7 +99,7 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 | `tuned` | Existe ese archivo y no se pasa `--tune` | El JSON guardado |
 | `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que reemplaza el JSON de ese modelo |
 
-`two_stage` guarda `artifacts/tuned_hyperparameters.json`. Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
+`two_stage` guarda `artifacts/tuned_hyperparameters.json`. Optuna recorre juntos el corte de RRF (100–1.000, log), un peso por fuente (0,1–3, log) y el bloque de LambdaRank en `RankerSearch`. El objetivo es el NDCG@20 de todos los lectores del último fold. Con `tune_on_example_users` o `--tune-on-example-users`, ese objetivo y el early stopping miran solo los de `ejemplo.csv`; el entrenamiento del ranker no cambia. Quedan fijos `n_estimators`, `early_stopping_rounds`, `rrf_k` y `label_gain`. Un trial se descarta si `num_leaves` supera `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de entrenamiento. Un JSON generado con cuotas por fuente no se reutiliza.
 
 `ease` guarda `artifacts/ease_hyperparameters.json` y no lee ni escribe el archivo de `two_stage`. Optuna recorre `reg_lambda` (1–100.000, log), `min_interactions` (10–100, log) y el peso de la matriz (`binary`, `rating` o `confidence`). El objetivo es el mismo NDCG@20 del último fold.
 

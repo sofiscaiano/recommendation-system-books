@@ -9,9 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from .config import LABEL_GAIN_MODES, PipelineConfig, search_ranges
+from .data import USER_COL
 from .metrics import ndcg_at_k
+from .split_data import example_users
+from .two_stage.columns import RankerTable
 from .two_stage.retrieval import CandidateFusion
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +41,7 @@ class TunedHyperparameters:
     ranker: dict[str, Any]
     run_name: str = ""
     label_gain: str = "linear"
+    tune_on_example_users: bool = False
 
 
 def tuned_hyperparameters_path(artifacts_dir: Path) -> Path:
@@ -74,10 +79,13 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         }
         run_name = payload.get("run_name", "")
         label_gain = payload.get("label_gain", "linear")
+        tune_on_example_users = payload.get("tune_on_example_users", False)
         if not isinstance(run_name, str):
             raise TypeError("run_name debe ser texto")
         if not isinstance(label_gain, str) or label_gain not in LABEL_GAIN_MODES:
             raise ValueError("label_gain debe ser 'linear' o 'exponential'")
+        if not isinstance(tune_on_example_users, bool):
+            raise TypeError("tune_on_example_users debe ser booleano")
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Hiperparámetros inválidos en {path}") from exc
     if rrf_cutoff < 1 or not weights or not ranker:
@@ -88,6 +96,7 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
         ranker=ranker,
         run_name=run_name,
         label_gain=label_gain,
+        tune_on_example_users=tune_on_example_users,
     )
 
 
@@ -98,11 +107,12 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
     if path.is_file():
         loaded = load_tuned_hyperparameters(path)
         LOGGER.info(
-            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s)",
+            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s, tune_on_example_users=%s)",
             path,
             loaded.run_name or "sin nombre",
             loaded.rrf_cutoff,
             loaded.label_gain,
+            loaded.tune_on_example_users,
         )
         if loaded.label_gain != config.ranker.label_gain:
             LOGGER.warning(
@@ -112,6 +122,14 @@ def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparamete
                 loaded.label_gain,
                 config.ranker.label_gain,
                 config.ranker.label_gain,
+            )
+        if loaded.tune_on_example_users != config.tune_on_example_users:
+            LOGGER.warning(
+                "El tuneo guardado se eligió con tune_on_example_users=%s y esta corrida usa %s. "
+                "Esos hiperparámetros no corresponden a esta población; "
+                "corré evaluate --tune de nuevo.",
+                loaded.tune_on_example_users,
+                config.tune_on_example_users,
             )
         return loaded, "saved"
     LOGGER.info("Sin %s; se usan los hiperparámetros fijos", path)
@@ -184,6 +202,29 @@ def _leaves_are_impossible(
     return leaves_exceed_depth or min_child_samples * num_leaves > n_rows
 
 
+def restrict_to_example_users(
+    table: RankerTable,
+    target: pd.DataFrame,
+    users: set[str],
+) -> tuple[RankerTable, pd.DataFrame]:
+    """Deja en la validación y en la verdad solo los lectores de ejemplo.csv.
+
+    Un lector de la entrega sin candidatos sigue en la verdad: el NDCG lo
+    cuenta como cero. Si nadie de esa lista tiene filas, no hay fold usable.
+    """
+
+    kept = table.frame.loc[table.frame[USER_COL].astype(str).isin(users)].reset_index(
+        drop=True
+    )
+    truth = target.loc[target[USER_COL].astype(str).isin(users)].reset_index(drop=True)
+    if kept.empty or truth.empty:
+        raise ValueError(
+            "Ningún lector de ejemplo.csv entra al último fold; "
+            "no se puede tunear solo sobre la entrega."
+        )
+    return RankerTable(frame=kept, feature_columns=table.feature_columns), truth
+
+
 def tune_pipeline(
     materials: list[Any],
     config: PipelineConfig,
@@ -205,6 +246,20 @@ def tune_pipeline(
     sources = sorted(materials[-1].source_candidates["source"].unique())
     if not sources:
         raise ValueError("No hay fuentes para ajustar")
+
+    example_ids = example_users(config) if config.tune_on_example_users else None
+    if example_ids is not None:
+        present = set(materials[-1].target[USER_COL].astype(str)) & example_ids
+        if not present:
+            raise ValueError(
+                "Ningún lector de ejemplo.csv entra al último fold; "
+                "no se puede tunear solo sobre la entrega."
+            )
+        LOGGER.info(
+            "Optuna puntúa el último fold en %s lectores de %s",
+            len(present),
+            config.example_path,
+        )
 
     def objective(trial: Any) -> float:
         """NDCG@20 del último fold para un corte, unos pesos y un LambdaRank."""
@@ -232,6 +287,11 @@ def tune_pipeline(
         ]
         train = _concat_feature_sets(built[:-1])
         validation = built[-1]
+        target = materials[-1].target
+        if example_ids is not None:
+            validation, target = restrict_to_example_users(
+                validation, target, example_ids
+            )
         if _leaves_are_impossible(parameters, n_rows=len(train.frame)):
             raise optuna.TrialPruned()
 
@@ -241,7 +301,7 @@ def tune_pipeline(
             overrides=parameters,
         ).fit(train, validation)
         recommendations = ranker.predict(validation)
-        score = ndcg_at_k(recommendations, materials[-1].target, k=20)
+        score = ndcg_at_k(recommendations, target, k=20)
         trial.set_user_attr("weights", dict(fusion.weights))
         trial.set_user_attr("rrf_cutoff", cutoff)
         trial.set_user_attr("ranker", parameters)

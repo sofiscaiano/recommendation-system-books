@@ -68,6 +68,8 @@ uv run python main.py evaluate --tune --note "búsqueda de hiperparámetros"
 uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
 
+`--tune-on-example-users` hace que ese study y el early stopping del último fold puntúen solo los lectores de `ejemplo.csv`. El ranker sigue entrenando con todos. Sin el flag se usa `PipelineConfig.tune_on_example_users`, apagado. Otro `--artifacts` evita pisar el JSON del tuneo sobre el fold completo.
+
 `evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
 El de `ease` escribe `artifacts/ease_hyperparameters.json`. Cada modelo
 reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro. Si

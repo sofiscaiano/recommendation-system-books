@@ -80,6 +80,12 @@ def seen_books(split: SplitData) -> pd.DataFrame:
     )
 
 
+def example_users(config: PipelineConfig) -> set[str]:
+    """Lectores de ``ejemplo.csv``. El tuning opcional puntúa solo a estos."""
+
+    return set(_submit_users(config))
+
+
 def _submit_users(config: PipelineConfig) -> list[str]:
     """Lectores de ``ejemplo.csv``, en ese orden y sin duplicar."""
 
