@@ -62,36 +62,49 @@ class RetrievalSearch:
 
 @dataclass(frozen=True)
 class RetrievalConfig:
-    """Fuentes de candidatos. Sin `--tune` se usan estos valores; Optuna solo toca `search`.
+    """Fuentes de candidatos. El corte y los pesos salen del último `--tune`.
 
-    `two_tower_source` suma el two-tower como sexta fuente. Está apagado por
-    defecto: el serving y el tuneo guardado no lo tienen.
+    Optuna recorre `search`. Sin `--tune`, la corrida lee
+    `artifacts/tuned_hyperparameters.json`. Si ese archivo no existe, hay que
+    correr `evaluate --tune` antes: esta clase no guarda un corte ni unos
+    pesos para usar por descuido.
+
+    Cada `*_source` decide si esa fuente se entrena. Un peso del tuneo solo
+    pondera las que quedan activas: un peso no la enciende. Una fuente activa
+    sin peso en el tuneo guardado hace fallar la corrida.
     """
 
-    rrf_cutoff: int = 200
     rrf_k: float = 60.0
     recency_half_life_days: float = 365.0
     implicit_factors: int = 64
     implicit_iterations: int = 20
     tfidf_max_features: int = 60_000
-    source_weights: dict[str, float] = field(
-        default_factory=lambda: {
-            "popularidad": 0.5,
-            "item_cosine": 1.0,
-            "als": 1.0,
-            "bpr": 1.0,
-            "tfidf": 0.8,
-            "two_tower": 1.0,
-        }
-    )
-    two_tower_source: bool = False
+    popularidad_source: bool = True
+    item_cosine_source: bool = True
+    als_source: bool = True
+    bpr_source: bool = True
+    tfidf_source: bool = True
+    two_tower_source: bool = True
     search: RetrievalSearch = field(default_factory=RetrievalSearch)
+
+    def enabled_sources(self) -> tuple[str, ...]:
+        """Nombres de las fuentes que esta config entrena, en orden fijo."""
+
+        flags = (
+            ("popularidad", self.popularidad_source),
+            ("item_cosine", self.item_cosine_source),
+            ("als", self.als_source),
+            ("bpr", self.bpr_source),
+            ("tfidf", self.tfidf_source),
+            ("two_tower", self.two_tower_source),
+        )
+        return tuple(name for name, enabled in flags if enabled)
 
     def __post_init__(self) -> None:
         if self.rrf_k <= 0:
             raise ValueError("rrf_k debe ser positivo")
-        if self.rrf_cutoff < 1:
-            raise ValueError("rrf_cutoff debe ser positivo")
+        if not self.enabled_sources():
+            raise ValueError("al menos una fuente de retrieval tiene que estar activa")
 
 
 @dataclass(frozen=True)
@@ -230,7 +243,8 @@ class PipelineConfig:
 
     `tune_on_example_users` limita el NDCG@20 de Optuna y el early stopping
     del último fold a los lectores de `example_path`. El ranker sigue
-    entrenando con todos los folds. Apagado, ese fold completo define ambos.
+    entrenando con todos los folds. Está prendido por defecto. Si se apaga,
+    ese fold completo define ambos.
     """
 
     db_path: Path = Path("data.db")
@@ -241,7 +255,7 @@ class PipelineConfig:
     run_note: str = ""
     model: str = "two_stage"
     optuna_trials: int = 30
-    tune_on_example_users: bool = False
+    tune_on_example_users: bool = True
     split: SplitConfig = field(default_factory=SplitConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     ranker: RankerConfig = field(default_factory=RankerConfig)

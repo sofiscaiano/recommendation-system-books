@@ -100,48 +100,42 @@ def load_tuned_hyperparameters(path: Path) -> TunedHyperparameters:
     )
 
 
-def resolve_saved_or_default(config: PipelineConfig) -> tuple[TunedHyperparameters, str]:
-    """Devuelve el tuneo guardado, o la config fija si ese archivo no existe."""
+def require_tuned_hyperparameters(config: PipelineConfig) -> TunedHyperparameters:
+    """Lee el último tuneo. Si no hay archivo, pide un `evaluate --tune`."""
 
     path = tuned_hyperparameters_path(config.artifacts_dir)
-    if path.is_file():
-        loaded = load_tuned_hyperparameters(path)
-        LOGGER.info(
-            "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s, tune_on_example_users=%s)",
-            path,
-            loaded.run_name or "sin nombre",
-            loaded.rrf_cutoff,
-            loaded.label_gain,
-            loaded.tune_on_example_users,
+    if not path.is_file():
+        raise ValueError(
+            f"No hay hiperparámetros tuneados en {path}. "
+            "Corré evaluate --tune antes de una corrida sin --tune."
         )
-        if loaded.label_gain != config.ranker.label_gain:
-            LOGGER.warning(
-                "El tuneo guardado se eligió con label_gain=%s y esta corrida usa %s. "
-                "Esos hiperparámetros no corresponden a esta ganancia; "
-                "corré evaluate --tune --label-gain %s.",
-                loaded.label_gain,
-                config.ranker.label_gain,
-                config.ranker.label_gain,
-            )
-        if loaded.tune_on_example_users != config.tune_on_example_users:
-            LOGGER.warning(
-                "El tuneo guardado se eligió con tune_on_example_users=%s y esta corrida usa %s. "
-                "Esos hiperparámetros no corresponden a esta población; "
-                "corré evaluate --tune de nuevo.",
-                loaded.tune_on_example_users,
-                config.tune_on_example_users,
-            )
-        return loaded, "saved"
-    LOGGER.info("Sin %s; se usan los hiperparámetros fijos", path)
-    retrieval = config.retrieval
-    return (
-        TunedHyperparameters(
-            rrf_cutoff=retrieval.rrf_cutoff,
-            weights=dict(retrieval.source_weights),
-            ranker={},
-        ),
-        "default",
+    loaded = load_tuned_hyperparameters(path)
+    LOGGER.info(
+        "Reusando hiperparámetros de %s (corrida %s, corte RRF=%s, label_gain=%s, tune_on_example_users=%s)",
+        path,
+        loaded.run_name or "sin nombre",
+        loaded.rrf_cutoff,
+        loaded.label_gain,
+        loaded.tune_on_example_users,
     )
+    if loaded.label_gain != config.ranker.label_gain:
+        LOGGER.warning(
+            "El tuneo guardado se eligió con label_gain=%s y esta corrida usa %s. "
+            "Esos hiperparámetros no corresponden a esta ganancia; "
+            "corré evaluate --tune --label-gain %s.",
+            loaded.label_gain,
+            config.ranker.label_gain,
+            config.ranker.label_gain,
+        )
+    if loaded.tune_on_example_users != config.tune_on_example_users:
+        LOGGER.warning(
+            "El tuneo guardado se eligió con tune_on_example_users=%s y esta corrida usa %s. "
+            "Esos hiperparámetros no corresponden a esta población; "
+            "corré evaluate --tune de nuevo.",
+            loaded.tune_on_example_users,
+            config.tune_on_example_users,
+        )
+    return loaded
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:

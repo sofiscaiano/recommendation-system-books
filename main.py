@@ -32,7 +32,10 @@ TuneOption = Annotated[
     bool,
     typer.Option(
         "--tune",
-        help="Busca con Optuna. Sin este flag se reutiliza el tuneo guardado",
+        help=(
+            "Busca con Optuna. Sin este flag se reutiliza el último tuneo; "
+            "si no hay archivo, two_stage pide correr --tune antes"
+        ),
     ),
 ]
 SeedOption = Annotated[int, typer.Option("--seed")]
@@ -51,10 +54,14 @@ LabelGainOption = Annotated[
     ),
 ]
 TwoTowerSourceOption = Annotated[
-    bool,
+    bool | None,
     typer.Option(
-        "--two-tower-source",
-        help="two_stage suma el two-tower como fuente de retrieval. Exige --tune la primera vez",
+        "--two-tower-source/--no-two-tower-source",
+        help=(
+            "Prende o apaga el two-tower como fuente de retrieval. "
+            "Sin el flag se usa RetrievalConfig.two_tower_source. "
+            "Prenderlo por primera vez exige --tune"
+        ),
     ),
 ]
 TuneOnExampleUsersOption = Annotated[
@@ -63,7 +70,7 @@ TuneOnExampleUsersOption = Annotated[
         "--tune-on-example-users/--no-tune-on-example-users",
         help=(
             "Optuna y el early stopping del último fold puntúan solo los lectores de --example. "
-            "Sin el flag se usa PipelineConfig.tune_on_example_users, apagado por defecto"
+            "Sin el flag se usa PipelineConfig.tune_on_example_users, prendido por defecto"
         ),
     ),
 ]
@@ -100,12 +107,15 @@ def _config(
     note: str,
     label_gain: str,
     model: str,
-    two_tower_source: bool = False,
+    two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> PipelineConfig:
     """Arma la config de la corrida con las rutas, la nota y el modelo."""
 
     base = PipelineConfig()
+    retrieval = base.retrieval
+    if two_tower_source is not None:
+        retrieval = replace(retrieval, two_tower_source=two_tower_source)
     config = replace(
         base,
         db_path=db,
@@ -116,7 +126,7 @@ def _config(
         run_note=note,
         model=model,
         ranker=replace(base.ranker, label_gain=label_gain),
-        retrieval=replace(base.retrieval, two_tower_source=two_tower_source),
+        retrieval=retrieval,
     )
     if tune_on_example_users is None:
         return config
@@ -135,7 +145,7 @@ def _run(
     note: str,
     label_gain: str,
     model: str,
-    two_tower_source: bool = False,
+    two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> None:
     """Ejecuta evaluate, submit o ambos con la misma configuración."""
@@ -184,7 +194,7 @@ def main(
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
 ) -> None:
-    """Sin subcomando, evalúa con el tuneo guardado o con los valores fijos."""
+    """Sin subcomando, evalúa. two_stage reutiliza el último tuneo."""
 
     if ctx.invoked_subcommand is None:
         _run(
@@ -212,7 +222,7 @@ def evaluate(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
-    two_tower_source: TwoTowerSourceOption = False,
+    two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
@@ -244,7 +254,7 @@ def submit(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
-    two_tower_source: TwoTowerSourceOption = False,
+    two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
@@ -276,7 +286,7 @@ def run_all(
     note: NoteOption = ...,
     label_gain: LabelGainOption = "linear",
     model: ModelOption = "two_stage",
-    two_tower_source: TwoTowerSourceOption = False,
+    two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa y después genera la entrega."""

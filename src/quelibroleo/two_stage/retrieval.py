@@ -541,34 +541,59 @@ def build_default_retrievers(
     implicit_iterations: int = 20,
     half_life_days: float = 365.0,
     tfidf_max_features: int = 60_000,
+    enabled: tuple[str, ...] | None = None,
     two_tower: PipelineConfig | None = None,
 ) -> list[Retriever]:
-    """Fuentes activas: popularidad, coseno, ALS, BPR, TF-IDF y, si se pide, el two-tower."""
+    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y el two-tower si se pasa."""
 
-    sources: list[Retriever] = [
-        PopularityRecommender(),
-        ItemCosineRetriever(half_life_days=half_life_days),
-        ImplicitMFRetriever(
-            "als",
-            factors=implicit_factors,
-            iterations=implicit_iterations,
-            half_life_days=half_life_days,
-            random_state=random_state,
-        ),
-        ImplicitMFRetriever(
-            "bpr",
-            factors=implicit_factors,
-            iterations=implicit_iterations,
-            half_life_days=half_life_days,
-            random_state=random_state,
-        ),
-        TfidfRetriever(
-            max_features=tfidf_max_features,
-            half_life_days=half_life_days,
-        ),
-    ]
-    if two_tower is not None:
+    wanted = None if enabled is None else set(enabled)
+    known = {"popularidad", "item_cosine", "als", "bpr", "tfidf", "two_tower"}
+    if wanted is not None:
+        unknown = sorted(wanted - known)
+        if unknown:
+            raise ValueError(
+                "Fuentes de retrieval desconocidas: " + ", ".join(unknown)
+            )
+
+    def include(name: str) -> bool:
+        return wanted is None or name in wanted
+
+    sources: list[Retriever] = []
+    if include("popularidad"):
+        sources.append(PopularityRecommender())
+    if include("item_cosine"):
+        sources.append(ItemCosineRetriever(half_life_days=half_life_days))
+    if include("als"):
+        sources.append(
+            ImplicitMFRetriever(
+                "als",
+                factors=implicit_factors,
+                iterations=implicit_iterations,
+                half_life_days=half_life_days,
+                random_state=random_state,
+            )
+        )
+    if include("bpr"):
+        sources.append(
+            ImplicitMFRetriever(
+                "bpr",
+                factors=implicit_factors,
+                iterations=implicit_iterations,
+                half_life_days=half_life_days,
+                random_state=random_state,
+            )
+        )
+    if include("tfidf"):
+        sources.append(
+            TfidfRetriever(
+                max_features=tfidf_max_features,
+                half_life_days=half_life_days,
+            )
+        )
+    if two_tower is not None and include("two_tower"):
         sources.append(TwoTowerRetriever(two_tower))
+    if not sources:
+        raise ValueError("al menos una fuente de retrieval tiene que estar activa")
     return sources
 
 
@@ -582,6 +607,7 @@ def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
         implicit_iterations=retrieval.implicit_iterations,
         half_life_days=retrieval.recency_half_life_days,
         tfidf_max_features=retrieval.tfidf_max_features,
+        enabled=retrieval.enabled_sources(),
         two_tower=config if retrieval.two_tower_source else None,
     )
 

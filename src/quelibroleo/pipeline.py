@@ -31,7 +31,7 @@ from .split_data import (
 )
 from .submission import fill_submission
 from .tuning import (
-    resolve_saved_or_default,
+    require_tuned_hyperparameters,
     restrict_to_example_users,
     tune_pipeline,
     tuned_hyperparameters_path,
@@ -151,7 +151,7 @@ def _collect_material(
 def _active_source_names(config: PipelineConfig) -> tuple[str, ...]:
     """Nombres de las fuentes que esta corrida entrena."""
 
-    return tuple(retriever.source_name for retriever in retrievers_from_config(config))
+    return config.retrieval.enabled_sources()
 
 
 def _weights_for_active_sources(
@@ -177,19 +177,6 @@ def _weights_for_active_sources(
     if not kept:
         raise ValueError("No hay pesos para las fuentes activas")
     return kept
-
-
-def _fusion_from_config(config: PipelineConfig) -> tuple[CandidateFusion, int]:
-    """Fusión y corte de RRF con los pesos fijos, sin Optuna."""
-
-    retrieval = config.retrieval
-    return (
-        CandidateFusion(
-            weights=_weights_for_active_sources(retrieval.source_weights, config),
-            rrf_k=retrieval.rrf_k,
-        ),
-        retrieval.rrf_cutoff,
-    )
 
 
 def _material_to_features(
@@ -243,24 +230,22 @@ def train_ranker_from_history(
 ) -> TrainedPipeline:
     """Entrena LambdaRank exclusivamente con pseudo-futuros rolling."""
 
-    folds = validation_folds(interactions, config)
-    if len(folds) < 2:
-        raise ValueError("Se requieren al menos dos folds rolling para entrenar")
-
     if tune:
         saved = None
         hyperparameters_origin = "tune"
         from .tracking import active_run_name
 
         hyperparameters_run_name = active_run_name()
+        depth_cutoff = int(config.retrieval.search.rrf_cutoff.high)
     else:
-        saved, hyperparameters_origin = resolve_saved_or_default(config)
-        hyperparameters_run_name = saved.run_name if hyperparameters_origin == "saved" else ""
-    depth_cutoff = (
-        int(config.retrieval.search.rrf_cutoff.high)
-        if tune
-        else saved.rrf_cutoff
-    )
+        saved = require_tuned_hyperparameters(config)
+        hyperparameters_origin = "saved"
+        hyperparameters_run_name = saved.run_name
+        depth_cutoff = saved.rrf_cutoff
+
+    folds = validation_folds(interactions, config)
+    if len(folds) < 2:
+        raise ValueError("Se requieren al menos dos folds rolling para entrenar")
     per_source = per_source_depth(
         depth_cutoff,
         rrf_k=config.retrieval.rrf_k,
@@ -288,15 +273,14 @@ def train_ranker_from_history(
         )
         cutoff = selection.rrf_cutoff
         overrides = selection.ranker
-    elif saved is not None and saved.ranker:
+    else:
+        assert saved is not None
         fusion = CandidateFusion(
             weights=_weights_for_active_sources(saved.weights, config),
             rrf_k=config.retrieval.rrf_k,
         )
         cutoff = saved.rrf_cutoff
         overrides = dict(saved.ranker)
-    else:
-        fusion, cutoff = _fusion_from_config(config)
     weights = dict(fusion.weights)
 
     built = [_material_to_features(material, fusion, cutoff) for material in materials]

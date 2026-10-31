@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import joblib
@@ -110,14 +111,19 @@ def fitted() -> tuple[ServingModel, pd.DataFrame, list[str]]:
     interactions = _interactions(books)
     catalog = _catalog(books)
     observed = observed_catalog(interactions, catalog)
-    config = PipelineConfig()
+    base = PipelineConfig()
+    # El catálogo sintético no alcanza para los folds del two-tower.
+    config = replace(
+        base,
+        retrieval=replace(base.retrieval, two_tower_source=False),
+    )
     retrievers = fit_retrievers(retrievers_from_config(config), interactions, observed)
     builder = ColumnBuilder().fit(interactions, observed)
     model = ServingModel(
         ranker=LambdaRanker(),
         retrievers=retrievers,
         feature_builder=builder,
-        weights=dict(config.retrieval.source_weights),
+        weights={name: 1.0 for name in config.retrieval.enabled_sources()},
         rrf_cutoff=50,
         rrf_k=config.retrieval.rrf_k,
     )

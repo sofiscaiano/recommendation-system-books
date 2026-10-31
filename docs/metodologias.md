@@ -1,9 +1,9 @@
 # Metodologías de retrieval y ranking
 
 El recomendador es un pipeline de dos etapas. **Retrieval** arma un ranking
-fusionado y se queda con un prefijo (por defecto 200 libros; la búsqueda mueve
-ese corte entre 100 y 1.000). **Ranking** los ordena y deja el top-20. Los
-libros ya leídos se excluyen en ambas etapas.
+fusionado y se queda con un prefijo. El corte y los pesos son los del último
+`--tune`; la búsqueda mueve el corte entre 100 y 1.000. **Ranking** los ordena
+y deja el top-20. Los libros ya leídos se excluyen en ambas etapas.
 
 El entrenamiento usa solo el historial anterior al corte temporal. La
 evaluación reserva las últimas 20 interacciones de cada lector (ver
@@ -107,16 +107,16 @@ evidencia, y pelearía con el peso por la misma decisión.
    podría separarlos. Un libro que no aparece en una fuente no suma ese
    término. Los pesos se normalizan para sumar 1. Escalarlos a todos por una
    constante no cambia el orden, y un árbol tampoco parte distinto `rrf_score`
-   si solo cambia la escala. Los pesos por defecto, antes de normalizar, son
-   0,5 (popularidad), 1,0 (coseno, ALS, BPR) y 0,8 (TF-IDF).
+   si solo cambia la escala. No hay pesos fijos: salen del último `--tune`.
 3. El corte `rrf_cutoff` se aplica solo después del merge: se queda con los
    primeros C libros de ese ranking (`rrf_score` descendente, desempate por
    `id_libro`). No recorta las listas de cada fuente. Un corte mayor es un
-   prefijo más largo del mismo ranking: solo agrega candidatos. El defecto es
-   200. Con `--tune`, Optuna recorre C como entero en escala logarítmica entre
-   100 y 1.000 (`RetrievalSearch.rrf_cutoff`) y un peso por fuente
-   (`RetrievalSearch.source_weight`, 0,1–3, log). La escala logarítmica sigue
-   el rendimiento decreciente de agrandar el conjunto.
+   prefijo más largo del mismo ranking: solo agrega candidatos. Tampoco hay
+   un corte fijo. Con `--tune`, Optuna recorre C como entero en escala
+   logarítmica entre 100 y 1.000 (`RetrievalSearch.rrf_cutoff`) y un peso por
+   fuente (`RetrievalSearch.source_weight`, 0,1–3, log). La escala logarítmica
+   sigue el rendimiento decreciente de agrandar el conjunto. Sin ese archivo,
+   la corrida pide `evaluate --tune` y no arranca.
 
 El orden de la fusión (`retrieval_rank`, `rrf_score`) no es el ranking final:
 solo define quién entra al ranker. Los scores y rangos de cada fuente se
@@ -163,8 +163,8 @@ no es otro hiperparámetro. Un trial se descarta si `num_leaves` supera
 `2^max_depth`, o si `min_child_samples * num_leaves` supera las filas de
 entrenamiento. El resultado queda en `artifacts/tuned_hyperparameters.json`,
 con los pesos ya normalizados. Sin `--tune`, el entrenamiento de la evaluación
-y de la entrega usa ese archivo. Un archivo de una búsqueda anterior, con
-cuotas, no se reutiliza.
+y de la entrega usa ese archivo. Si no existe, hay que buscar antes. Un
+archivo de una búsqueda anterior, con cuotas, no se reutiliza.
 
 ### Columnas de two_stage
 

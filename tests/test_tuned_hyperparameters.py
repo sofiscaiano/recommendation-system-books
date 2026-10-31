@@ -10,7 +10,7 @@ from quelibroleo.config import PipelineConfig
 from quelibroleo.data import USER_COL
 from quelibroleo.tuning import (
     load_tuned_hyperparameters,
-    resolve_saved_or_default,
+    require_tuned_hyperparameters,
     restrict_to_example_users,
 )
 from quelibroleo.two_stage.columns import RankerTable
@@ -25,26 +25,17 @@ def _payload() -> dict[str, object]:
     }
 
 
-def test_missing_file_uses_fixed_config(tmp_path) -> None:
-    chosen, origin = resolve_saved_or_default(
-        PipelineConfig(artifacts_dir=tmp_path)
-    )
-
-    assert origin == "default"
-    assert chosen.rrf_cutoff == 200
-    assert chosen.ranker == {}
-    assert chosen.weights["popularidad"] == 0.5
+def test_missing_file_asks_for_tune(tmp_path) -> None:
+    with pytest.raises(ValueError, match="evaluate --tune"):
+        require_tuned_hyperparameters(PipelineConfig(artifacts_dir=tmp_path))
 
 
 def test_saved_file_is_reused(tmp_path) -> None:
     path = tmp_path / "tuned_hyperparameters.json"
     path.write_text(json.dumps(_payload()), encoding="utf-8")
 
-    chosen, origin = resolve_saved_or_default(
-        PipelineConfig(artifacts_dir=tmp_path)
-    )
+    chosen = require_tuned_hyperparameters(PipelineConfig(artifacts_dir=tmp_path))
 
-    assert origin == "saved"
     assert chosen.rrf_cutoff == 1000
     assert chosen.weights == {"svd": 1.4, "popularidad": 0.8}
     assert chosen.ranker["num_leaves"] == 33
@@ -89,16 +80,13 @@ def test_saved_example_population_must_be_boolean(tmp_path) -> None:
 def test_saved_population_mismatch_warns(tmp_path, caplog) -> None:
     path = tmp_path / "tuned_hyperparameters.json"
     payload = _payload()
-    payload["tune_on_example_users"] = True
+    payload["tune_on_example_users"] = False
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with caplog.at_level(logging.WARNING):
-        chosen, origin = resolve_saved_or_default(
-            PipelineConfig(artifacts_dir=tmp_path)
-        )
+        chosen = require_tuned_hyperparameters(PipelineConfig(artifacts_dir=tmp_path))
 
-    assert origin == "saved"
-    assert chosen.tune_on_example_users is True
+    assert chosen.tune_on_example_users is False
     assert "tune_on_example_users" in caplog.text
 
 

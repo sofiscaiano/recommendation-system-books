@@ -74,9 +74,9 @@ Fuentes, fusionadas con Reciprocal Rank Fusion ponderado (`k = 60`, fijo):
 | BPR | Mismo matriz; optimiza orden, no el valor de la confianza |
 | TF-IDF | Coseno entre el perfil de texto del lector y cada libro |
 
-Pesos por defecto, antes de normalizar a suma 1: popularidad 0,5; coseno, ALS y BPR 1,0; TF-IDF 0,8.
+No hay pesos ni corte fijos: salen del último `evaluate --tune` y quedan en `artifacts/tuned_hyperparameters.json`. Sin ese archivo, `two_stage` pide correr `--tune` y no arranca.
 
-No hay cupos por fuente. El corte (`rrf_cutoff`, defecto 200) se aplica al ranking ya fusionado. Cada fuente se lee más profundo que ese corte. La recencia usa semivida de 365 días.
+No hay cupos por fuente. El corte (`rrf_cutoff`) se aplica al ranking ya fusionado. Cada fuente se lee más profundo que ese corte. La recencia usa semivida de 365 días.
 
 ### Ranking
 
@@ -95,7 +95,7 @@ Las columnas de `two_stage` (`two_stage/columns.py`) son numéricas: scores y ra
 
 | Modo | Cuándo | Qué entrena |
 | --- | --- | --- |
-| `fixed` | No existe el JSON de ese modelo | Valores de `PipelineConfig` |
+| `fixed` | `ease` sin su JSON, o `two_tower` | Valores fijos de ese modelo. `two_stage` no entra acá: sin JSON no arranca |
 | `tuned` | Existe ese archivo y no se pasa `--tune` | El JSON guardado |
 | `tune` | `evaluate --tune` o `submit --tune` | Un study de Optuna (`optuna_trials`, defecto 30) que reemplaza el JSON de ese modelo |
 

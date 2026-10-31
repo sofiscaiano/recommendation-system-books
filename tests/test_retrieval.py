@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
+import pytest
 
 from quelibroleo.baselines import PopularityRecommender
+from quelibroleo.config import PipelineConfig, RetrievalConfig
 from quelibroleo.two_stage.retrieval import (
     CandidateFusion,
     ItemCosineRetriever,
     build_default_retrievers,
     per_source_depth,
+    retrievers_from_config,
 )
 
 
@@ -102,6 +107,32 @@ def test_default_retrievers_keep_sources_that_change_the_candidate_set() -> None
     names = [retriever.source_name for retriever in build_default_retrievers()]
 
     assert names == ["popularidad", "item_cosine", "als", "bpr", "tfidf"]
+
+
+def test_source_flags_choose_which_retrievers_are_built() -> None:
+    retrieval = replace(
+        RetrievalConfig(),
+        als_source=False,
+        bpr_source=False,
+        two_tower_source=True,
+    )
+    config = replace(PipelineConfig(), retrieval=retrieval)
+    names = [retriever.source_name for retriever in retrievers_from_config(config)]
+
+    assert names == ["popularidad", "item_cosine", "tfidf", "two_tower"]
+
+
+def test_retrieval_config_requires_one_enabled_source() -> None:
+    with pytest.raises(ValueError, match="al menos una fuente"):
+        replace(
+            RetrievalConfig(),
+            popularidad_source=False,
+            item_cosine_source=False,
+            als_source=False,
+            bpr_source=False,
+            tfidf_source=False,
+            two_tower_source=False,
+        )
 
 
 def test_per_source_depth_keeps_the_tail_out_of_the_fused_head() -> None:

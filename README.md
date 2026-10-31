@@ -68,12 +68,14 @@ uv run python main.py evaluate --tune --note "búsqueda de hiperparámetros"
 uv run python main.py submit --note "entrega con el tuneo guardado"
 ```
 
-`--tune-on-example-users` hace que ese study y el early stopping del último fold puntúen solo los lectores de `ejemplo.csv`. El ranker sigue entrenando con todos. Sin el flag se usa `PipelineConfig.tune_on_example_users`, apagado. Otro `--artifacts` evita pisar el JSON del tuneo sobre el fold completo.
+`--tune-on-example-users` hace que ese study y el early stopping del último fold puntúen solo los lectores de `ejemplo.csv`. El ranker sigue entrenando con todos. Sin el flag se usa `PipelineConfig.tune_on_example_users`, prendido por defecto. Otro `--artifacts` evita pisar el JSON del tuneo sobre el fold completo.
 
 `evaluate --tune` de `two_stage` escribe `artifacts/tuned_hyperparameters.json`.
 El de `ease` escribe `artifacts/ease_hyperparameters.json`. Cada modelo
-reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro. Si
-el archivo de ese modelo no existe, usa los hiperparámetros fijos.
+reutiliza solo el suyo: una corrida no pisa ni lee el archivo del otro.
+`two_stage` no tiene corte ni pesos fijos: sin ese JSON hay que correr
+`evaluate --tune` antes. `ease`, si no tiene archivo, usa los valores de
+`EaseConfig`.
 
 `--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra
@@ -90,7 +92,8 @@ Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
 único (`fecha-modelo-comando-modo-sufijo`). El tag `model` es el algoritmo
 (`two_stage`, `popularity` o `ease`). El modo es `tune` si busca, `tuned` si
-reutiliza el archivo de ese modelo y `fixed` si usa los valores por defecto. Ese
+reutiliza el archivo de ese modelo y `fixed` si ese modelo usa valores fijos
+(`ease` sin JSON, o `two_tower`). `two_stage` sin JSON no arranca. Ese
 nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
 cambia de columnas. Cada `submit` copia esa entrega a `submissions/{run_name}/`
@@ -138,9 +141,9 @@ El detalle de cada método, pesos y librerías está en
 [`docs/metodologias.md`](docs/metodologias.md). El sistema tiene dos etapas:
 
 1. **Retrieval**: popularidad, item-item por coseno, ALS, BPR y perfil TF-IDF.
-   Las fuentes se combinan con Reciprocal Rank Fusion ponderado. Un corte de
-   ese ranking entrega los candidatos al ranker (por defecto 200; entre 100 y
-   1.000 si se busca).
+   Las fuentes se combinan con Reciprocal Rank Fusion ponderado. El corte y
+   los pesos son los del último `--tune` (Optuna recorre el corte entre 100 y
+   1.000).
 2. **Ranking**: LightGBM LambdaRank ordena los candidatos con relevancia lineal
    0–10 y señales colaborativas, de contenido y secuenciales.
 
