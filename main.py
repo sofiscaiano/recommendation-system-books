@@ -47,10 +47,13 @@ NoteOption = Annotated[
     ),
 ]
 LabelGainOption = Annotated[
-    str,
+    str | None,
     typer.Option(
         "--label-gain",
-        help="Ganancia de LambdaRank: linear (0..10) o exponential (2^rel-1). Cambiarla exige --tune",
+        help=(
+            "Ganancia de LambdaRank: linear (0..10) o exponential (2^rel-1). "
+            "Sin el flag se usa RankerConfig.label_gain. Cambiarla exige --tune"
+        ),
     ),
 ]
 TwoTowerSourceOption = Annotated[
@@ -105,7 +108,7 @@ def _config(
     artifacts: Path,
     seed: int,
     note: str,
-    label_gain: str,
+    label_gain: str | None,
     model: str,
     two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
@@ -116,6 +119,9 @@ def _config(
     retrieval = base.retrieval
     if two_tower_source is not None:
         retrieval = replace(retrieval, two_tower_source=two_tower_source)
+    ranker = base.ranker
+    if label_gain is not None:
+        ranker = replace(ranker, label_gain=label_gain)
     config = replace(
         base,
         db_path=db,
@@ -125,7 +131,7 @@ def _config(
         random_seed=seed,
         run_note=note,
         model=model,
-        ranker=replace(base.ranker, label_gain=label_gain),
+        ranker=ranker,
         retrieval=retrieval,
     )
     if tune_on_example_users is None:
@@ -143,7 +149,7 @@ def _run(
     tune: bool,
     seed: int,
     note: str,
-    label_gain: str,
+    label_gain: str | None,
     model: str,
     two_tower_source: bool | None = None,
     tune_on_example_users: bool | None = None,
@@ -166,10 +172,11 @@ def _run(
         tune_on_example_users,
     )
     logging.getLogger(__name__).info(
-        "Comando %s (model=%s, tune=%s, tune_on_example_users=%s). Log en %s",
+        "Comando %s (model=%s, tune=%s, label_gain=%s, tune_on_example_users=%s). Log en %s",
         command,
         model,
         tune,
+        config.ranker.label_gain,
         config.tune_on_example_users,
         artifacts / "run.log",
     )
@@ -191,7 +198,7 @@ def main(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = "",
-    label_gain: LabelGainOption = "linear",
+    label_gain: LabelGainOption = None,
     model: ModelOption = "two_stage",
 ) -> None:
     """Sin subcomando, evalúa. two_stage reutiliza el último tuneo."""
@@ -220,7 +227,7 @@ def evaluate(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
-    label_gain: LabelGainOption = "linear",
+    label_gain: LabelGainOption = None,
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
@@ -252,7 +259,7 @@ def submit(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
-    label_gain: LabelGainOption = "linear",
+    label_gain: LabelGainOption = None,
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
@@ -284,7 +291,7 @@ def run_all(
     tune: TuneOption = False,
     seed: SeedOption = 42,
     note: NoteOption = ...,
-    label_gain: LabelGainOption = "linear",
+    label_gain: LabelGainOption = None,
     model: ModelOption = "two_stage",
     two_tower_source: TwoTowerSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,

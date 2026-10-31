@@ -213,10 +213,11 @@ class TwoTowerConfig:
 class RankerConfig:
     """LambdaRank. `n_estimators` y `early_stopping_rounds` no entran a Optuna.
 
-    `label_gain` no entra a la búsqueda. `linear` es la identidad 0..10.
-    `exponential` es `2^rating - 1`, la misma ganancia que
-    `sklearn.metrics.ndcg_score`. Cambiarlo pide un `--tune` nuevo: el archivo
-    guardado se eligió bajo la ganancia anterior.
+    `label_gain` no entra a la búsqueda y no es un sí/no. `linear` es la
+    identidad 0..10. `exponential` es `2^rating - 1`, la misma ganancia que
+    `sklearn.metrics.ndcg_score`. El valor de esta clase es el de la corrida.
+    Cambiarlo pide un `--tune` nuevo: el historial se eligió bajo la ganancia
+    anterior.
     """
 
     n_estimators: int = 200

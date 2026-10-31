@@ -79,13 +79,14 @@ resto de lo que el study no elige). Si no hay ninguna, hay que correr
 y, si no tiene archivo, usa los valores de `EaseConfig`. Una corrida no pisa
 ni lee el archivo del otro modelo.
 
-`--label-gain` elige la ganancia de LambdaRank: `linear` (defecto, identidad
-0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación). No entra
-a Optuna. Cambiarla exige buscar de nuevo: el tuneo guardado se eligió
-con la ganancia anterior, y otra config no lo reutiliza:
+`RankerConfig.label_gain` elige la ganancia de LambdaRank: `linear` (defecto,
+identidad 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación).
+No es un sí/no y no entra a Optuna. La corrida usa ese campo de `config.py`.
+`--label-gain` solo lo pisa si se pasa. Cambiarlo exige buscar de nuevo: el
+tuneo guardado se eligió con la ganancia anterior, y otra config no lo reutiliza:
 
 ```bash
-uv run python main.py evaluate --tune --label-gain exponential --note "label_gain exponencial alineado con el NDCG"
+uv run python main.py evaluate --tune --note "tuneo con el label_gain de config.py"
 ```
 
 `--note` es obligatorio. Ese texto queda como descripción de la corrida.
