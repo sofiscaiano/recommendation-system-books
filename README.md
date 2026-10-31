@@ -104,6 +104,19 @@ Para comparar:
 uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
+El diagnóstico del hold-out no reentrena. Después de un `evaluate`:
+
+```bash
+uv run python diagnostico.py
+```
+
+Lee el top-20 de `artifacts/evaluation_recommendations.csv`. Si esa corrida fue
+`two_stage` y dejó `artifacts/evaluation_retrieval_hits.csv` del mismo
+`run_name`, separa la pérdida de NDCG en retrieval y ranking. Parte el hold-out
+entre los lectores de `ejemplo.csv` y el resto, y dentro de cada grupo por
+cuartil de historial y por si el test repite autor o género. Sin el CSV de hits
+solo informa el NDCG y cuántos libros del test quedaron en el top-20.
+
 ## Evaluación interna
 
 Hasta tener el protocolo oficial cerrado, el hold-out interno es:

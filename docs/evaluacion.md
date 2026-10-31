@@ -95,8 +95,9 @@ después de reentrenar con todo el historial.
 Una fila por libro de test del hold-out, no por candidato. `in_retrieval` es 1
 si ese libro entró al conjunto que ve el ranker y 0 si no. Con eso se separa
 una falla de retrieval de una de ranking sin guardar las listas completas.
-`diagnostico.py` lo lee junto con el top-20. Solo lo escribe `two_stage`; una
-corrida de una etapa borra el archivo de la evaluación anterior.
+Después de un `evaluate`, `uv run python diagnostico.py` lo lee junto con el
+top-20 y no reentrena. Solo lo escribe `two_stage`; una corrida de una etapa
+borra el archivo de la evaluación anterior.
 
 ## `data_quality.json`
 
