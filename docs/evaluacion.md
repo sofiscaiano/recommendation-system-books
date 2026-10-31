@@ -56,7 +56,7 @@ tipos de fila y ambos usan el último fold interno, no el holdout oficial.
 | --- | --- | --- |
 | cualquiera | `full` | Referencia de ese bloque, en el mismo fold. Los deltas de las otras filas se restan contra esta. |
 | `ranker` | `without_retrieval` | Reentrena LambdaRank sin scores, ranks ni señales de las fuentes. `ndcg_at_20` es el ranking resultante y `features` cuenta las variables conservadas. |
-| `ranker` | `without_sequence` | Reentrena sin recencia, transiciones, coincidencia con el último autor o género, ni antigüedad de publicación. |
+| `ranker` | `without_sequence` | Reentrena sin recencia, transiciones, coincidencia con el último autor o género, ni diferencia de años entre la última lectura y la edición. |
 | `retrieval` | `without_<fuente>` | Quita esa fuente antes de fusionar candidatos. No reentrena el ranker: `recall` y `ndcg_at_20` describen el conjunto candidato y su techo oracle. |
 
 `full` de retrieval es el conjunto con todas las fuentes. Es el mismo número que

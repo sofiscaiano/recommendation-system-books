@@ -335,7 +335,6 @@ class ColumnBuilder:
         frame["publication_age"] = (
             frame["user_cutoff_date"].dt.year - frame["anio_edicion_num"]
         )
-        frame.loc[frame["publication_age"] < 0, "publication_age"] = np.nan
         frame["log_item_count"] = np.log1p(frame["item_count"])
         frame["log_user_count"] = np.log1p(frame["user_count"])
 

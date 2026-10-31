@@ -179,7 +179,7 @@ anterior al corte:
 | Lector | Cantidad de lecturas, media y desvío de rating, días activos, autores y géneros distintos. |
 | Ítem | Cantidad de lecturas, usuarios distintos, media, desvío y media bayesiana (`smoothing=10` hacia la media global). También `log1p` del conteo. |
 | Afinidad | Cuántas veces el lector ya eligió ese autor o género, y con qué rating medio. |
-| Secuencia | Coincidencia con el último autor y género; proporción de ese autor o género en las últimas 10 lecturas; probabilidad empírica de pasar del autor/género anterior al del candidato; edad de publicación respecto del corte del lector. |
+| Secuencia | Coincidencia con el último autor y género; proporción de ese autor o género en las últimas 10 lecturas; probabilidad empírica de pasar del autor/género anterior al del candidato; diferencia en años entre la última lectura del lector y el año de edición (negativa si la edición es posterior). |
 
 No se codifican texto libre ni identificadores categóricos de alta cardinalidad
 dentro del booster: autor y género entran solo a través de estos agregados

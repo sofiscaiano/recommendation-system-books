@@ -23,6 +23,37 @@ def test_label_gain_is_configurable_and_reaches_lightgbm() -> None:
         RankerConfig(label_gain="identity")
 
 
+def test_publication_age_is_years_since_the_users_last_read() -> None:
+    train = pd.DataFrame(
+        [("u1", "b1", "2020-06-01", 8)],
+        columns=["id_lector", "id_libro", "fecha", "rating"],
+    )
+    train["fecha"] = pd.to_datetime(train["fecha"])
+    catalog = pd.DataFrame(
+        {
+            "id_libro": ["b1", "b_old", "b_new"],
+            "autor": ["A", "B", "C"],
+            "genero": ["G", "H", "I"],
+            "anio_edicion_num": [2010, 2015, 2024],
+        }
+    )
+    fused = pd.DataFrame(
+        [
+            ("u1", "b_old", 0.4, 1),
+            ("u1", "b_new", 0.2, 2),
+        ],
+        columns=["id_lector", "id_libro", "rrf_score", "retrieval_rank"],
+    )
+    source = fused.rename(columns={"rrf_score": "score", "retrieval_rank": "rank"})
+    source["source"] = "mock"
+
+    features = ColumnBuilder().fit(train, catalog).transform(fused, source)
+
+    ages = features.frame.set_index("id_libro")["publication_age"]
+    assert ages["b_old"] == 5
+    assert ages["b_new"] == -4
+
+
 def test_features_labels_and_lambdarank_roundtrip() -> None:
     train = pd.DataFrame(
         [
