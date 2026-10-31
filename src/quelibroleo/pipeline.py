@@ -122,6 +122,7 @@ def _collect_material(
     config: PipelineConfig,
     fold: int,
     per_source: int,
+    readers: pd.DataFrame | None = None,
 ) -> FoldMaterial:
     """Entrena las fuentes y el builder de un fold, sin fusionar todavía."""
 
@@ -138,7 +139,7 @@ def _collect_material(
         train,
         per_source=per_source,
     )
-    builder = ColumnBuilder().fit(train, catalog)
+    builder = ColumnBuilder().fit(train, catalog, readers)
     return FoldMaterial(
         fold=fold,
         train=train,
@@ -226,6 +227,7 @@ def train_ranker_from_history(
     books: pd.DataFrame,
     config: PipelineConfig,
     *,
+    readers: pd.DataFrame | None = None,
     tune: bool = False,
     execute_ablations: bool = True,
 ) -> TrainedPipeline:
@@ -261,6 +263,7 @@ def train_ranker_from_history(
             config,
             fold.fold,
             per_source,
+            readers,
         )
         for fold in folds
     ]
@@ -388,6 +391,7 @@ def _score_history(
     users: tuple[str, ...],
     books: pd.DataFrame,
     config: PipelineConfig,
+    readers: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, FusionResult, RankerTable]:
     """Recupera, fusiona y rankea un historial con el modelo ya entrenado."""
 
@@ -403,6 +407,7 @@ def _score_history(
             rrf_k=config.retrieval.rrf_k,
             n_sources=len(retrievers_from_config(config)),
         ),
+        readers=readers,
     )
     fusion = CandidateFusion(
         weights=trained.weights,
@@ -668,6 +673,7 @@ class TwoStage:
             split.history,
             split.books,
             self.config,
+            readers=split.readers,
             tune=tune,
             execute_ablations=split.holdout,
         )
@@ -683,6 +689,7 @@ class TwoStage:
             tuple(users),
             self._split.books,
             self.config,
+            readers=self._split.readers,
         )
         self.fused = fused
         return recommendations
@@ -715,7 +722,13 @@ def run_ablations(
         ),
         "without_sequence": lambda column: not any(
             token in column
-            for token in ("recent_", "transition_", "same_last_", "publication_age")
+            for token in (
+                "recent_",
+                "transition_",
+                "same_last_",
+                "publication_age",
+                "edition_vs_user_mean_year",
+            )
         ),
     }
     reference_columns = train_features.feature_columns

@@ -56,7 +56,7 @@ tipos de fila y ambos usan el último fold interno, no el holdout oficial.
 | --- | --- | --- |
 | cualquiera | `full` | Referencia de ese bloque, en el mismo fold. Los deltas de las otras filas se restan contra esta. |
 | `ranker` | `without_retrieval` | Reentrena LambdaRank sin scores, ranks ni señales de las fuentes. `ndcg_at_20` es el ranking resultante y `features` cuenta las variables conservadas. |
-| `ranker` | `without_sequence` | Reentrena sin recencia, transiciones, coincidencia con el último autor o género, ni diferencia de años entre la última lectura y la edición. |
+| `ranker` | `without_sequence` | Reentrena sin recencia, transiciones (incluida la ventana de las últimas 3), coincidencia con el último autor o género, ni diferencias de años entre la edición y las lecturas del lector. |
 | `retrieval` | `without_<fuente>` | Quita esa fuente antes de fusionar candidatos. No reentrena el ranker: `recall` y `ndcg_at_20` describen el conjunto candidato y su techo oracle. |
 
 `full` de retrieval es el conjunto con todas las fuentes. Es el mismo número que
@@ -80,7 +80,7 @@ Los prefijos agrupan el origen:
 
 - `score_`, `rank_`, `present_` y `reciprocal_`: salida de una fuente.
 - `rrf_score` y `retrieval_rank`: resultado de la fusión.
-- `recent_`, `transition_`, `same_last_` y `publication_age`: señales secuenciales.
+- `recent_`, `transition_`, `same_last_`, `publication_age` y `edition_vs_user_mean_year`: señales secuenciales. `transition_` incluye la probabilidad del último paso y la ventana ponderada de los últimos tres.
 - `user_` e `item_`: estadísticas históricas calculadas solo con train.
 
 ## `evaluation_recommendations.csv`

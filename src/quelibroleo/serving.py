@@ -91,7 +91,7 @@ def export_serving_artifact(
         len(interactions),
     )
     retrievers = fit_retrievers(retrievers_from_config(config), interactions, catalog)
-    builder = ColumnBuilder().fit(interactions, catalog)
+    builder = ColumnBuilder().fit(interactions, catalog, bundle.readers)
     model = ServingModel(
         ranker=trained.ranker,
         retrievers=retrievers,
