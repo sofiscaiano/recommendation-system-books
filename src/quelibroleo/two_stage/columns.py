@@ -17,9 +17,14 @@ import pandas as pd
 from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 _GENDER_CODE = {"Mujer": 1, "Hombre": 0}
-_TRANSITION_LAGS = 3
-# El más reciente pesa 3, el anterior 2 y el tercero 1.
-_TRANSITION_WEIGHTS = {1: 3.0, 2: 2.0, 3: 1.0}
+# Últimas lecturas del lector que entran al promedio, y cuántas lecturas
+# hacia adelante cuenta cada una al estimar la probabilidad.
+_TRANSITION_LAGS = 5
+_TRANSITION_HORIZON = 5
+# La más reciente pesa 5 y la más antigua de la ventana pesa 1.
+_TRANSITION_WEIGHTS = {
+    lag: float(_TRANSITION_LAGS - lag + 1) for lag in range(1, _TRANSITION_LAGS + 1)
+}
 
 
 def _safe_source(value: str) -> str:
@@ -53,6 +58,7 @@ class ColumnBuilder:
         self.user_recent_genre_: pd.DataFrame | None = None
         self.author_transition_: pd.DataFrame | None = None
         self.genre_transition_: pd.DataFrame | None = None
+        self.item_transition_: pd.DataFrame | None = None
         self.author_stats_: pd.DataFrame | None = None
         self.genre_stats_: pd.DataFrame | None = None
         self.readers_: pd.DataFrame | None = None
@@ -124,47 +130,28 @@ class ColumnBuilder:
             .agg(genre_read_count=(ITEM_COL, "size"))
         )
 
-        transition_data = enriched[
-            [USER_COL, "autor", "genero"]
-        ].copy()
-        transition_data["previous_author"] = transition_data.groupby(USER_COL)[
-            "autor"
-        ].shift()
-        transition_data["previous_genre"] = transition_data.groupby(USER_COL)[
-            "genero"
-        ].shift()
-        self.author_transition_ = self._transition_probabilities(
-            transition_data,
+        self.author_transition_ = _transition_probabilities(
+            enriched,
+            "autor",
             previous="previous_author",
             current="autor",
             output="author_transition_prob",
         )
-        self.genre_transition_ = self._transition_probabilities(
-            transition_data,
+        self.genre_transition_ = _transition_probabilities(
+            enriched,
+            "genero",
             previous="previous_genre",
             current="genero",
             output="genre_transition_prob",
         )
-        return self
-
-    @staticmethod
-    def _transition_probabilities(
-        frame: pd.DataFrame,
-        *,
-        previous: str,
-        current: str,
-        output: str,
-    ) -> pd.DataFrame:
-        """Probabilidad de pasar de un autor o género al siguiente."""
-
-        valid = frame[frame[previous].notna()]
-        counts = valid.groupby([previous, current]).size().rename("_pair")
-        totals = valid.groupby(previous).size().rename("_total")
-        result = counts.reset_index().merge(
-            totals.reset_index(), on=previous, how="left"
+        self.item_transition_ = _transition_probabilities(
+            enriched,
+            ITEM_COL,
+            previous="previous_item",
+            current=ITEM_COL,
+            output="item_transition_prob",
         )
-        result[output] = result["_pair"] / result["_total"]
-        return result[[previous, current, output]]
+        return self
 
     def _user_activity_tables(self, enriched: pd.DataFrame) -> dict[str, pd.DataFrame]:
         """Estadísticas, afinidades y últimos ítems de cada lector."""
@@ -243,6 +230,9 @@ class ColumnBuilder:
         user_last = user_last.merge(
             _recent_labels(enriched, "genero", "genre"), on=USER_COL, how="left"
         )
+        user_last = user_last.merge(
+            _recent_labels(enriched, ITEM_COL, "item"), on=USER_COL, how="left"
+        )
         recent = enriched.groupby(USER_COL, sort=False).tail(self.recent_n)
         return {
             "user_stats": user_stats,
@@ -318,6 +308,7 @@ class ColumnBuilder:
                 self.genre_stats_,
                 self.author_transition_,
                 self.genre_transition_,
+                self.item_transition_,
             )
         ):
             raise RuntimeError("ColumnBuilder debe entrenarse antes de transformar")
@@ -379,6 +370,12 @@ class ColumnBuilder:
             right_on=["previous_genre", "genero"],
             how="left",
         )
+        frame = frame.merge(
+            self.item_transition_,
+            left_on=["item_lag1", ITEM_COL],
+            right_on=["previous_item", ITEM_COL],
+            how="left",
+        )
 
         frame["same_last_author"] = (
             (frame["autor"] != "") & (frame["autor"] == frame["last_author"])
@@ -427,6 +424,14 @@ class ColumnBuilder:
             previous="previous_genre",
             probability="genre_transition_prob",
         )
+        frame["item_transition_window"] = _window_transition(
+            frame,
+            self.item_transition_,
+            lag_prefix="item",
+            current=ITEM_COL,
+            previous="previous_item",
+            probability="item_transition_prob",
+        )
         frame["log_item_count"] = np.log1p(frame["item_count"])
         frame["log_user_count"] = np.log1p(frame["user_count"])
 
@@ -444,12 +449,12 @@ class ColumnBuilder:
             "user_mean_read_year",
             "author_read_count",
             "genre_read_count",
-            "author_lag1",
-            "author_lag2",
-            "author_lag3",
-            "genre_lag1",
-            "genre_lag2",
-            "genre_lag3",
+            "previous_item",
+            *(
+                f"{prefix}_lag{lag}"
+                for prefix in ("author", "genre", "item")
+                for lag in range(1, _TRANSITION_LAGS + 1)
+            ),
         }
         feature_columns = tuple(
             column
@@ -509,6 +514,52 @@ def _recent_labels(frame: pd.DataFrame, column: str, prefix: str) -> pd.DataFram
     return wide.reset_index()
 
 
+def _transition_probabilities(
+    ordered: pd.DataFrame,
+    column: str,
+    *,
+    previous: str,
+    current: str,
+    output: str,
+    horizon: int = _TRANSITION_HORIZON,
+) -> pd.DataFrame:
+    """P(destino | origen): el destino aparece entre las siguientes lecturas.
+
+    Cada lectura con algo después aporta 1 al denominador de su origen. Cada
+    destino distinto dentro de las próximas ``horizon`` lecturas aporta 1 al
+    numerador. El final de la historia, sin lecturas posteriores, no entra.
+    """
+
+    position = ordered.groupby(USER_COL, sort=False).cumcount()
+    hits: list[pd.DataFrame] = []
+    for step in range(1, horizon + 1):
+        nxt = ordered.groupby(USER_COL, sort=False)[column].shift(-step)
+        hits.append(
+            pd.DataFrame(
+                {
+                    USER_COL: ordered[USER_COL].to_numpy(),
+                    "_pos": position.to_numpy(),
+                    previous: ordered[column].to_numpy(),
+                    current: nxt.to_numpy(),
+                }
+            )
+        )
+    pairs = pd.concat(hits, ignore_index=True).dropna(subset=[current])
+    if pairs.empty:
+        return pd.DataFrame(columns=[previous, current, output])
+    occurrences = pairs.drop_duplicates([USER_COL, "_pos"])
+    totals = occurrences.groupby(previous, sort=False).size().rename("_total")
+    distinct = pairs.drop_duplicates([USER_COL, "_pos", current])
+    counts = (
+        distinct.groupby([previous, current], sort=False).size().rename("_pair")
+    )
+    result = counts.reset_index().merge(
+        totals.reset_index(), on=previous, how="left"
+    )
+    result[output] = result["_pair"] / result["_total"]
+    return result[[previous, current, output]]
+
+
 def _window_transition(
     frame: pd.DataFrame,
     transition: pd.DataFrame,
@@ -520,8 +571,8 @@ def _window_transition(
 ) -> np.ndarray:
     """Promedio ponderado de P(candidato | cada una de las últimas lecturas).
 
-    Un par que no aparece en el historial aporta 0. Si el lector tiene menos
-    de tres lecturas, ese puesto no entra al denominador.
+    Un par que no aparece en el historial aporta 0. Si al lector le falta
+    alguna de las últimas lecturas, ese puesto no entra al denominador.
     """
 
     lookup = transition.set_index([previous, current])[probability]

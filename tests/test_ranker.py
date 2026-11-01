@@ -80,9 +80,9 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     u1 lee Ana (8), Bea (6) y otra vez Ana (9), con huecos de 4 y 10 días.
     u2 lee Ana (5), Bea (7) y Ciro (10); el primer hueco es 0 y el segundo 31.
     u3 tiene una sola lectura, género `-` y nacimiento vacío.
-    Las transiciones globales que salen de esas secuencias son
-    P(Bea|Ana)=1, P(Ana|Bea)=1/2, P(Ciro|Bea)=1/2,
-    P(Poesia|Novela)=1, P(Novela|Poesia)=1/2 y P(Poesia|Poesia)=1/2.
+    Cada lectura mira hasta 5 siguientes. De ahí salen, entre otras,
+    P(Ciro|Ana)=1/2, P(Ana|Ana)=1/2, P(Bea|Ana)=1,
+    P(Poesia|Novela)=1 y P(Novela|Poesia)=1/2.
     """
 
     train = pd.DataFrame(
@@ -151,6 +151,7 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
         "user_decade_diversity",
         "author_transition_window",
         "genre_transition_window",
+        "item_transition_window",
     }
     assert added <= set(table.feature_columns)
     assert {
@@ -179,10 +180,12 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u1", "bC1", "item_author_rating_ratio", 1)
     _expect(frame, "u1", "bC1", "item_author_share", 1)
     _expect(frame, "u1", "bC1", "item_genre_share", 1 / 3)
-    _expect(frame, "u1", "bC1", "author_transition_prob", None)
-    _expect(frame, "u1", "bC1", "author_transition_window", 1 / 6)
+    _expect(frame, "u1", "bC1", "author_transition_prob", 0.5)
+    _expect(frame, "u1", "bC1", "author_transition_window", 0.5)
     _expect(frame, "u1", "bC1", "genre_transition_prob", 1)
     _expect(frame, "u1", "bC1", "genre_transition_window", 5 / 6)
+    _expect(frame, "u1", "bC1", "item_transition_prob", None)
+    _expect(frame, "u1", "bC1", "item_transition_window", 7 / 24)
 
     _expect(frame, "u1", "b_new", "edition_vs_user_mean_year", 14)
     _expect(frame, "u1", "b_new", "user_author_share", 2 / 3)
@@ -191,9 +194,10 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u1", "b_new", "author_mean_rating", ana_mean)
     _expect(frame, "u1", "b_new", "item_author_rating_ratio", None)
     _expect(frame, "u1", "b_new", "item_author_share", None)
-    _expect(frame, "u1", "b_new", "author_transition_prob", None)
-    _expect(frame, "u1", "b_new", "author_transition_window", 1 / 6)
-    _expect(frame, "u1", "b_new", "genre_transition_window", 1 / 6)
+    _expect(frame, "u1", "b_new", "author_transition_prob", 0.5)
+    _expect(frame, "u1", "b_new", "author_transition_window", 0.5)
+    _expect(frame, "u1", "b_new", "genre_transition_window", 0.5)
+    _expect(frame, "u1", "b_new", "item_transition_window", 0)
 
     _expect(frame, "u1", "b_blank", "user_author_share", 0)
     _expect(frame, "u1", "b_blank", "item_author_share", None)
@@ -222,9 +226,10 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u2", "bA2", "item_author_share", 1 / 3)
     _expect(frame, "u2", "bA2", "item_genre_share", 1 / 3)
     _expect(frame, "u2", "bA2", "author_transition_prob", None)
-    _expect(frame, "u2", "bA2", "author_transition_window", 1 / 6)
+    _expect(frame, "u2", "bA2", "author_transition_window", 7 / 24)
     _expect(frame, "u2", "bA2", "genre_transition_prob", 0.5)
-    _expect(frame, "u2", "bA2", "genre_transition_window", 5 / 12)
+    _expect(frame, "u2", "bA2", "genre_transition_window", 0.5)
+    _expect(frame, "u2", "bA2", "item_transition_window", 7 / 24)
 
     _expect(frame, "u3", "bA1", "user_mean_days_between_reads", None)
     _expect(frame, "u3", "bA1", "user_first_year", 2021)
@@ -243,7 +248,7 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
 
 
 def test_transition_window_renormalizes_when_history_has_two_reads() -> None:
-    """Con dos lecturas el denominador es 5 (pesos 3 y 2), no 6."""
+    """Con dos lecturas el denominador es 9 (pesos 5 y 4), no 15."""
 
     train = pd.DataFrame(
         [
@@ -287,8 +292,8 @@ def test_transition_window_renormalizes_when_history_has_two_reads() -> None:
         .frame
     )
 
-    _expect(frame, "u_short", "bA", "author_transition_window", 3 / 5)
-    _expect(frame, "u_short", "bB", "author_transition_window", 2 / 5)
+    _expect(frame, "u_short", "bA", "author_transition_window", 7 / 9)
+    _expect(frame, "u_short", "bB", "author_transition_window", 4 / 9)
     _expect(frame, "u_short", "bA", "author_transition_prob", 1)
     _expect(frame, "u_short", "bA", "user_mean_days_between_reads", 20)
     _expect(frame, "u_short", "bA", "user_age_first", 21)
@@ -296,6 +301,39 @@ def test_transition_window_renormalizes_when_history_has_two_reads() -> None:
     _expect(frame, "u_short", "bA", "user_author_diversity", 1)
     # 2000 y 2001 caen en la misma década: 1 década / 2 lecturas.
     _expect(frame, "u_short", "bA", "user_decade_diversity", 0.5)
+
+
+def test_item_transition_stops_after_five_reads() -> None:
+    """El quinto libro posterior cuenta; el sexto no."""
+
+    hit = ["b0", "f1", "f2", "f3", "f4", "bZ"]
+    miss = ["b0", "f1", "f2", "f3", "f4", "f5", "bZ"]
+    rows = [("u_hit", book, f"2010-01-{index + 1:02d}", 8) for index, book in enumerate(hit)]
+    rows += [
+        ("u_miss", book, f"2011-01-{index + 1:02d}", 8) for index, book in enumerate(miss)
+    ]
+    rows.append(("u_now", "b0", "2012-01-01", 8))
+    train = pd.DataFrame(rows, columns=["id_lector", "id_libro", "fecha", "rating"])
+    train["fecha"] = pd.to_datetime(train["fecha"])
+    books = sorted({book for _, book, _, _ in rows} | {"bZ"})
+    catalog = pd.DataFrame(
+        {
+            "id_libro": books,
+            "autor": ["A"] * len(books),
+            "genero": ["G"] * len(books),
+            "anio_edicion_num": [2000] * len(books),
+        }
+    )
+    fused = pd.DataFrame(
+        [("u_now", "bZ", 0.5, 1)],
+        columns=["id_lector", "id_libro", "rrf_score", "retrieval_rank"],
+    )
+    source = fused.rename(columns={"rrf_score": "score", "retrieval_rank": "rank"})
+    source["source"] = "mock"
+    frame = ColumnBuilder().fit(train, catalog).transform(fused, source).frame
+
+    _expect(frame, "u_now", "bZ", "item_transition_prob", 0.5)
+    _expect(frame, "u_now", "bZ", "item_transition_window", 0.5)
 
 
 def test_features_labels_and_lambdarank_roundtrip() -> None:
