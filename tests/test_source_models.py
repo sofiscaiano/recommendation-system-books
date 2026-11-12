@@ -7,6 +7,7 @@ import json
 import pandas as pd
 import pytest
 
+from quelibroleo import two_tower as two_tower_module
 from quelibroleo.config import (
     AlsConfig,
     AlsSearch,
@@ -203,7 +204,7 @@ def test_invalid_two_tower_file_is_rejected(tmp_path) -> None:
         load_two_tower_hyperparameters(path)
 
 
-def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path) -> None:
+def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path, monkeypatch) -> None:
     rows = [
         (
             f"u{user}",
@@ -239,6 +240,14 @@ def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path) -> None:
         ),
     )
     model = build_model("two_tower", config)
+    calls: list[bool] = []
+    real_train = two_tower_module.train
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("validation") is not None)
+        return real_train(*args, **kwargs)
+
+    monkeypatch.setattr(two_tower_module, "train", counted)
     model.fit(_split(frame), tune=True)
 
     saved = json.loads((tmp_path / "two_tower_hyperparameters.json").read_text(encoding="utf-8"))
@@ -247,6 +256,8 @@ def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path) -> None:
     assert saved["min_item_reads"] in {1, 2}
     assert model.hyperparameters_origin == "tune"
     assert "search" not in model.hyperparameters
+    assert calls == [True, False]
+    assert model.hyperparameters["epochs"] == 1
 
     reused = build_model("two_tower", config)
     reused.fit(_split(frame), tune=False)

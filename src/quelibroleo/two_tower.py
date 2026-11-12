@@ -394,13 +394,14 @@ def tune_two_tower(
     history: pd.DataFrame,
     books: pd.DataFrame,
     config: PipelineConfig,
-) -> TwoTowerParameters:
+) -> tuple[TwoTowerParameters, int, float]:
     """Elige dimensión, learning rate, temperatura y el mínimo de lecturas.
 
-    Cada trial corta las épocas con patience sobre el último fold y reentrena
-    con toda la historia. El NDCG@20 es el de esa validación, no el del
-    reentrenamiento. Con ``tune_on_example_users`` la validación mira solo
-    los lectores de ``ejemplo.csv``.
+    Cada trial solo entrena el último fold y corta las épocas con patience.
+    El NDCG@20 es el de esa validación. El reentrenamiento con toda la historia
+    queda para el modelo final, una vez elegido el trial. Con
+    ``tune_on_example_users`` la validación mira solo los lectores de
+    ``ejemplo.csv``.
     """
 
     try:
@@ -423,11 +424,12 @@ def tune_two_tower(
             temperature=float(search.temperature.suggest(trial, "temperature")),
             min_item_reads=int(search.min_item_reads.suggest(trial, "min_item_reads")),
         )
-        _trained, _epochs, score = _fit_once(
+        epochs, score = _fit_once(
             prepared,
             books,
             apply_two_tower_parameters(config, parameters),
         )
+        trial.set_user_attr("epochs", epochs)
         LOGGER.info(
             "two_tower trial %s: dim=%s lr=%.4g temperatura=%.4g mínimo=%s ndcg=%.4f",
             trial.number,
@@ -463,21 +465,22 @@ def tune_two_tower(
     best = study.best_trial
     from .tracking import active_run_name
 
-    return TwoTowerParameters(
+    parameters = TwoTowerParameters(
         embedding_dim=int(best.params["embedding_dim"]),
         learning_rate=float(best.params["learning_rate"]),
         temperature=float(best.params["temperature"]),
         min_item_reads=int(best.params["min_item_reads"]),
         run_name=active_run_name(),
     )
+    return parameters, int(best.user_attrs["epochs"]), float(best.value)
 
 
 def _fit_once(
     history: pd.DataFrame,
     books: pd.DataFrame,
     config: PipelineConfig,
-) -> tuple[Trained, int, float]:
-    """Elige las épocas en el último fold y reentrena. El NDCG es el de la validación."""
+) -> tuple[int, float]:
+    """Elige las épocas en el último fold. No reentrena: el study solo necesita el NDCG."""
 
     fold = validation_folds(history, config)[-1]
     users, target = _study_population(config, fold.query_users, fold.target)
@@ -488,8 +491,7 @@ def _fit_once(
         epochs=config.two_tower.max_epochs,
         validation=(users, target),
     )
-    trained, _, _ = train(history, books, config, epochs=epochs)
-    return trained, epochs, val_ndcg
+    return epochs, val_ndcg
 
 
 def _books_only(history: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
@@ -541,24 +543,36 @@ class TwoTowerModel:
         """Elige las épocas en el último fold y reentrena con toda ``split.history``.
 
         Con ``tune``, antes busca dimensión, learning rate, temperatura y el
-        mínimo de lecturas. Sin ``tune``, usa el JSON si existe.
+        mínimo de lecturas. Cada trial solo valida; el reentrenamiento es uno,
+        con las épocas del trial ganador. Sin ``tune``, usa el JSON si existe
+        y elige las épocas de nuevo con ``fit_history``.
         """
 
         if tune:
-            parameters = tune_two_tower(split.history, split.books, self.config)
+            parameters, epochs, val_ndcg = tune_two_tower(
+                split.history, split.books, self.config
+            )
             self.hyperparameters_origin = "tune"
             self.hyperparameters_run_name = parameters.run_name
             write_two_tower_hyperparameters(self.config, parameters)
             self.config = apply_two_tower_parameters(self.config, parameters)
+            prepared = _books_only(split.history, split.books)
+            LOGGER.info("two_tower reentrena %s épocas con toda la historia", epochs)
+            self._trained, _, _ = train(
+                prepared,
+                split.books,
+                self.config,
+                epochs=epochs,
+            )
         else:
             self.config, origin, run_name = resolved_two_tower_config(self.config)
             self.hyperparameters_origin = origin
             self.hyperparameters_run_name = run_name if origin == "saved" else ""
-        self._trained, epochs, val_ndcg = fit_history(
-            split.history,
-            split.books,
-            self.config,
-        )
+            self._trained, epochs, val_ndcg = fit_history(
+                split.history,
+                split.books,
+                self.config,
+            )
         self.hyperparameters = {
             "model": self.name,
             **two_tower_resolved_values(self.config),

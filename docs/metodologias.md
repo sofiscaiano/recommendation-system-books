@@ -279,8 +279,9 @@ cambia la config del tuneo de fusión, así que hay que buscar de nuevo.
 
 `two_tower` también tiene study. Optuna recorre `embedding_dim` (32–128, log),
 `learning_rate` (1e-4–3e-3, log), `temperature` (0,02–0,2, log) y
-`min_item_reads` (2–20). Cada trial elige las épocas con patience y reentrena;
-el NDCG es el de esa validación. Dropout, weight decay, batch, `recent_reads`
+`min_item_reads` (2–20). Cada trial elige las épocas con patience y el NDCG
+es el de esa validación. El reentrenamiento con toda la historia es uno, al
+final, con las épocas del trial ganador. Dropout, weight decay, batch, `recent_reads`
 y `user_authors` quedan en `TwoTowerConfig`. El archivo es
 `two_tower_hyperparameters.json`. Conviene bajar `optuna_trials` para esa
 corrida: cada trial entrena la red. `two_stage` le pasa al proceso hijo la
