@@ -291,7 +291,13 @@ def fill_with_popularity(
                 group["score"].astype(float).tolist(),
                 strict=True,
             ):
-                if item in already_read or item in taken or not math.isfinite(score):
+                # El mínimo de float32 es finito: implicit lo usa para los ya vistos.
+                if (
+                    item in already_read
+                    or item in taken
+                    or not math.isfinite(score)
+                    or score <= float(np.finfo(np.float32).min) / 2
+                ):
                     continue
                 picked.append((item, score))
                 taken.add(item)
@@ -322,34 +328,6 @@ def fill_with_popularity(
                 {USER_COL: user, ITEM_COL: item, "score": score, "rank": rank}
             )
     return pd.DataFrame.from_records(rows, columns=columns)
-
-
-def _without_seen_or_padding(ranked: pd.DataFrame, history: pd.DataFrame) -> pd.DataFrame:
-    """Saca leídos, duplicados y el relleno de implicit cuando se pide más que el catálogo.
-
-    `recommend` de implicit completa hasta N con el mínimo de float32 en los ítems
-    ya vistos y, si no alcanza, repite el ítem 0 con score 0.
-    """
-
-    frame = ranked.copy()
-    frame[USER_COL] = frame[USER_COL].astype(str)
-    frame[ITEM_COL] = frame[ITEM_COL].astype(str)
-    scores = pd.to_numeric(frame["score"], errors="coerce")
-    # El filtro de implicit marca lo ya visto con el mínimo de float32.
-    frame = frame.loc[scores.notna() & (scores > np.finfo(np.float32).min / 2)]
-    if not history.empty:
-        seen = (
-            history.astype({USER_COL: str, ITEM_COL: str})
-            .groupby(USER_COL, sort=False)[ITEM_COL]
-            .agg(set)
-            .to_dict()
-        )
-        keep = [
-            item not in seen.get(user, set())
-            for user, item in zip(frame[USER_COL], frame[ITEM_COL], strict=True)
-        ]
-        frame = frame.loc[keep]
-    return frame.drop_duplicates([USER_COL, ITEM_COL], keep="first")
 
 
 class SourceModel:
