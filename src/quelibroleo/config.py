@@ -72,13 +72,14 @@ class RetrievalConfig:
     Cada `*_source` decide si esa fuente se entrena. Un peso del tuneo solo
     pondera las que quedan activas: un peso no la enciende. Una fuente activa
     sin peso en el tuneo guardado hace fallar la corrida.
+
+    Los hiperparámetros de cada fuente no viven acá. Salen del JSON de esa
+    fuente, o de su config si el archivo no existe. `recency_half_life_days`
+    es solo la semivida con la que EASE puntúa: su study no la busca.
     """
 
     rrf_k: float = 60.0  # valor estandar
     recency_half_life_days: float = 365.0
-    implicit_factors: int = 64
-    implicit_iterations: int = 20
-    tfidf_max_features: int = 60_000
     popularidad_source: bool = True
     item_cosine_source: bool = True
     als_source: bool = True
@@ -179,12 +180,174 @@ class EaseConfig:
 
 
 @dataclass(frozen=True)
-class TwoTowerConfig:
-    """Two-tower de Covington (2016) con la pérdida de Yi (2019). Sin Optuna.
+class ItemCosineSearch:
+    """Semivida que recorre el study de `--model item_cosine`."""
 
-    Solo la época sale de la validación: NDCG@20 del último fold rolling.
-    `recent_reads` suma a la torre de lector el promedio de sus últimas
-    lecturas (0 lo apaga). `user_authors` suma el promedio de los autores.
+    half_life_days: SearchRange = field(
+        default_factory=lambda: SearchRange(30, 1095, log=True)
+    )
+
+
+@dataclass(frozen=True)
+class ItemCosineConfig:
+    """Semivida del coseno ítem-ítem, si no hay un JSON guardado.
+
+    El modo centrado en la media del lector quedó afuera. `two_stage` no
+    vuelve a buscar esta semivida: lee el JSON o este valor, y solo elige el peso.
+    """
+
+    half_life_days: float = 365.0
+    search: ItemCosineSearch = field(default_factory=ItemCosineSearch)
+
+    def __post_init__(self) -> None:
+        if self.half_life_days <= 0:
+            raise ValueError("half_life_days debe ser positivo")
+
+
+@dataclass(frozen=True)
+class AlsSearch:
+    """Hiperparámetros que recorre el study de `--model als`."""
+
+    factors: SearchRange = field(
+        default_factory=lambda: SearchRange(16, 256, log=True, integer=True)
+    )
+    iterations: SearchRange = field(
+        default_factory=lambda: SearchRange(5, 40, integer=True)
+    )
+    regularization: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-3, 10.0, log=True)
+    )
+    half_life_days: SearchRange = field(
+        default_factory=lambda: SearchRange(30, 1095, log=True)
+    )
+
+
+@dataclass(frozen=True)
+class AlsConfig:
+    """Factores, pasos, regularización y semivida de ALS, sin un JSON guardado.
+
+    `regularization` arranca en 0,01, el defecto de implicit. No se busca
+    `alpha`: la confianza ya es `(1 + rating / 10)` por la recencia.
+    """
+
+    factors: int = 64
+    iterations: int = 20
+    regularization: float = 0.01
+    half_life_days: float = 365.0
+    search: AlsSearch = field(default_factory=AlsSearch)
+
+    def __post_init__(self) -> None:
+        if min(self.factors, self.iterations) < 1:
+            raise ValueError("factors e iterations deben ser positivos")
+        if self.regularization <= 0 or self.half_life_days <= 0:
+            raise ValueError("regularization y half_life_days deben ser positivos")
+
+
+@dataclass(frozen=True)
+class BprSearch:
+    """Hiperparámetros que recorre el study de `--model bpr`."""
+
+    factors: SearchRange = field(
+        default_factory=lambda: SearchRange(16, 256, log=True, integer=True)
+    )
+    iterations: SearchRange = field(
+        default_factory=lambda: SearchRange(10, 100, integer=True)
+    )
+    learning_rate: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-3, 0.1, log=True)
+    )
+    regularization: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-4, 1.0, log=True)
+    )
+    half_life_days: SearchRange = field(
+        default_factory=lambda: SearchRange(30, 1095, log=True)
+    )
+
+
+@dataclass(frozen=True)
+class BprConfig:
+    """Factores y pasos propios de BPR. No se comparten con ALS.
+
+    `learning_rate` y `regularization` arrancan en 0,01, el defecto de implicit.
+    """
+
+    factors: int = 64
+    iterations: int = 20
+    learning_rate: float = 0.01
+    regularization: float = 0.01
+    half_life_days: float = 365.0
+    search: BprSearch = field(default_factory=BprSearch)
+
+    def __post_init__(self) -> None:
+        if min(self.factors, self.iterations) < 1:
+            raise ValueError("factors e iterations deben ser positivos")
+        if min(self.learning_rate, self.regularization, self.half_life_days) <= 0:
+            raise ValueError(
+                "learning_rate, regularization y half_life_days deben ser positivos"
+            )
+
+
+@dataclass(frozen=True)
+class TfidfSearch:
+    """Hiperparámetros que recorre el study de `--model tfidf`."""
+
+    max_features: SearchRange = field(
+        default_factory=lambda: SearchRange(5_000, 80_000, log=True, integer=True)
+    )
+    half_life_days: SearchRange = field(
+        default_factory=lambda: SearchRange(30, 1095, log=True)
+    )
+
+
+@dataclass(frozen=True)
+class TfidfConfig:
+    """Tope de términos y semivida del perfil TF-IDF, sin un JSON guardado.
+
+    Unigramas, bigramas, `min_df`, `max_df` y el TF sublineal no entran al study.
+    """
+
+    max_features: int = 60_000
+    half_life_days: float = 365.0
+    search: TfidfSearch = field(default_factory=TfidfSearch)
+
+    def __post_init__(self) -> None:
+        if self.max_features < 1:
+            raise ValueError("max_features debe ser positivo")
+        if self.half_life_days <= 0:
+            raise ValueError("half_life_days debe ser positivo")
+
+
+@dataclass(frozen=True)
+class TwoTowerSearch:
+    """Hiperparámetros que recorre el study de `--model two_tower`.
+
+    Cada trial sigue eligiendo las épocas con `max_epochs` y `patience`.
+    Dropout, weight decay, batch, `recent_reads` y `user_authors` quedan fijos.
+    """
+
+    embedding_dim: SearchRange = field(
+        default_factory=lambda: SearchRange(32, 128, log=True, integer=True)
+    )
+    learning_rate: SearchRange = field(
+        default_factory=lambda: SearchRange(1e-4, 3e-3, log=True)
+    )
+    temperature: SearchRange = field(
+        default_factory=lambda: SearchRange(0.02, 0.2, log=True)
+    )
+    min_item_reads: SearchRange = field(
+        default_factory=lambda: SearchRange(2, 20, integer=True)
+    )
+
+
+@dataclass(frozen=True)
+class TwoTowerConfig:
+    """Two-tower de Covington (2016) con la pérdida de Yi (2019).
+
+    El study elige dimensión, learning rate, temperatura y el mínimo de
+    lecturas de un libro. La época sale de la validación: NDCG@20 del último
+    fold rolling, con patience. `recent_reads` suma a la torre de lector el
+    promedio de sus últimas lecturas (0 lo apaga). `user_authors` suma el
+    promedio de los autores.
     """
 
     embedding_dim: int = 64
@@ -198,6 +361,7 @@ class TwoTowerConfig:
     max_epochs: int = 30
     patience: int = 3
     min_item_reads: int = 5
+    search: TwoTowerSearch = field(default_factory=TwoTowerSearch)
 
     def __post_init__(self) -> None:
         if min(self.embedding_dim, self.batch_size, self.max_epochs, self.patience) < 1:
@@ -265,6 +429,10 @@ class PipelineConfig:
     ranker: RankerConfig = field(default_factory=RankerConfig)
     ease: EaseConfig = field(default_factory=EaseConfig)
     two_tower: TwoTowerConfig = field(default_factory=TwoTowerConfig)
+    item_cosine: ItemCosineConfig = field(default_factory=ItemCosineConfig)
+    als: AlsConfig = field(default_factory=AlsConfig)
+    bpr: BprConfig = field(default_factory=BprConfig)
+    tfidf: TfidfConfig = field(default_factory=TfidfConfig)
 
     def as_dict(self) -> dict[str, Any]:
         """Devuelve una representación apta para JSON."""

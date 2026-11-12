@@ -74,10 +74,14 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 `artifacts/tuning_history.json` y copia la última en
 `artifacts/tuned_hyperparameters.json`. Sin `--tune` reutiliza la entrada
 cuya config coincide (fuentes, `label_gain`, semilla, split, `rrf_k` y el
-resto de lo que el study no elige). Si no hay ninguna, hay que correr
-`evaluate --tune`. El de `ease` escribe `artifacts/ease_hyperparameters.json`
-y, si no tiene archivo, usa los valores de `EaseConfig`. `two_stage` no pisa
-ese JSON. Si EASE está prendido como fuente, lo lee para armar la matriz.
+resto de lo que el study no elige, incluidos los hiperparámetros ya resueltos
+de cada fuente). Si no hay ninguna, hay que correr
+`evaluate --tune`. Cada fuente con hiperparámetros propios escribe el suyo
+(`ease_hyperparameters.json`, `item_cosine_hyperparameters.json`,
+`als_hyperparameters.json`, `bpr_hyperparameters.json`,
+`tfidf_hyperparameters.json`, `two_tower_hyperparameters.json`) y, si no tiene
+archivo, usa los valores de su config. `two_stage` no pisa esos JSON. Si la
+fuente está prendida, los lee para armar la lista.
 
 `RankerConfig.label_gain` elige la ganancia de LambdaRank: `linear` (defecto,
 identidad 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación).
@@ -94,9 +98,9 @@ uv run python main.py evaluate --tune --note "tuneo con el label_gain de config.
 Cada ejecución abre una corrida en el experimento MLflow `quelibroleo`
 (`sqlite:///mlflow.db`, o `MLFLOW_TRACKING_URI` si está definido) con un nombre
 único (`fecha-modelo-comando-modo-sufijo`). El tag `model` es el algoritmo
-(`two_stage`, `popularity` o `ease`). El modo es `tune` si busca, `tuned` si
+(`two_stage`, `popularity`, `ease`, `item_cosine`, `als`, `bpr`, `tfidf` o `two_tower`). El modo es `tune` si busca, `tuned` si
 reutiliza un tuneo de la misma config y `fixed` si ese modelo usa valores fijos
-(`ease` sin JSON, o `two_tower`). `two_stage` sin un tuneo de esa config no arranca. Ese
+(una fuente sin su JSON). `two_stage` sin un tuneo de esa config no arranca. Ese
 nombre queda en el tag `run_name`, en
 `artifacts/run.json` y en los JSON y CSV de diagnóstico. `submission.csv` no
 cambia de columnas. Cada `submit` copia esa entrega a `submissions/{run_name}/`

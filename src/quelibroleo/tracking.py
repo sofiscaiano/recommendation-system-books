@@ -37,6 +37,11 @@ _MODEL_ARTIFACTS = {
         "feature_importance.csv",
     ),
     "ease": ("ease_hyperparameters.json",),
+    "two_tower": ("two_tower_hyperparameters.json",),
+    "item_cosine": ("item_cosine_hyperparameters.json",),
+    "als": ("als_hyperparameters.json",),
+    "bpr": ("bpr_hyperparameters.json",),
+    "tfidf": ("tfidf_hyperparameters.json",),
 }
 _current_run_name: ContextVar[str] = ContextVar("current_run_name", default="")
 
@@ -68,7 +73,13 @@ def _reuses_saved_file(config: PipelineConfig) -> bool:
 
         return has_saved_ease_hyperparameters(config.artifacts_dir)
     if config.model == "two_tower":
-        return False
+        from .source_models import has_saved_two_tower_hyperparameters
+
+        return has_saved_two_tower_hyperparameters(config.artifacts_dir)
+    if config.model in {"item_cosine", "als", "bpr", "tfidf"}:
+        from .source_models import has_saved_source_hyperparameters
+
+        return has_saved_source_hyperparameters(config.artifacts_dir, config.model)
     return has_matching_tuned_hyperparameters(config)
 
 

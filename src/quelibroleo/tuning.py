@@ -15,6 +15,13 @@ from .config import LABEL_GAIN_MODES, PipelineConfig, search_ranges
 from .data import USER_COL
 from .ease import ease_source_parameters
 from .metrics import ndcg_at_k
+from .source_models import (
+    als_source_parameters,
+    bpr_source_parameters,
+    item_cosine_source_parameters,
+    tfidf_source_parameters,
+    two_tower_resolved_values,
+)
 from .split_data import example_users
 from .two_stage.columns import RankerTable
 from .two_stage.retrieval import CandidateFusion
@@ -70,9 +77,9 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
 
     No entran la nota, la carpeta de artefactos ni la ruta de la entrega: no
     cambian el study. `example_path` entra solo si el objetivo usa esos lectores.
-    El two-tower entra solo si es una fuente. EASE entra con λ y el mínimo de
-    lecturas, los del JSON o los de `EaseConfig`. La recencia del perfil ya
-    está en `recency_half_life_days`.
+    Cada fuente activa entra con los valores ya resueltos, los del JSON o los
+    de su config. Esos valores no los elige este study. La semivida de EASE
+    sigue en `recency_half_life_days`.
     """
 
     retrieval = config.retrieval
@@ -89,9 +96,6 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
         "retrieval": {
             "rrf_k": retrieval.rrf_k,
             "recency_half_life_days": retrieval.recency_half_life_days,
-            "implicit_factors": retrieval.implicit_factors,
-            "implicit_iterations": retrieval.implicit_iterations,
-            "tfidf_max_features": retrieval.tfidf_max_features,
             "sources": list(retrieval.enabled_sources()),
             "search": asdict(retrieval.search),
         },
@@ -102,8 +106,34 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
             "search": asdict(ranker.search),
         },
     }
+    if retrieval.item_cosine_source:
+        parameters = item_cosine_source_parameters(config)
+        fingerprint["item_cosine"] = {"half_life_days": parameters.half_life_days}
+    if retrieval.als_source:
+        parameters = als_source_parameters(config)
+        fingerprint["als"] = {
+            "factors": parameters.factors,
+            "iterations": parameters.iterations,
+            "regularization": parameters.regularization,
+            "half_life_days": parameters.half_life_days,
+        }
+    if retrieval.bpr_source:
+        parameters = bpr_source_parameters(config)
+        fingerprint["bpr"] = {
+            "factors": parameters.factors,
+            "iterations": parameters.iterations,
+            "learning_rate": parameters.learning_rate,
+            "regularization": parameters.regularization,
+            "half_life_days": parameters.half_life_days,
+        }
+    if retrieval.tfidf_source:
+        parameters = tfidf_source_parameters(config)
+        fingerprint["tfidf"] = {
+            "max_features": parameters.max_features,
+            "half_life_days": parameters.half_life_days,
+        }
     if retrieval.two_tower_source:
-        fingerprint["two_tower"] = asdict(config.two_tower)
+        fingerprint["two_tower"] = two_tower_resolved_values(config)
     if retrieval.ease_source:
         parameters = ease_source_parameters(config)
         fingerprint["ease"] = {

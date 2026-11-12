@@ -36,7 +36,9 @@ lectura es `rating / 10` por un factor de recencia.
 
 La recencia es una semivida exponencial: si `half_life_days` es 365, una
 lectura de un año antes del último evento del lector pesa la mitad
-(`2^(-edad_en_días / semivida)`).
+(`2^(-edad_en_días / semivida)`). Esa semivida es de esta fuente: sale de
+`item_cosine_hyperparameters.json` o, si no hay archivo, de
+`ItemCosineConfig` (365). No es la de EASE ni la de ALS.
 
 Un modo `adjusted` (rating centrado en la media del lector, sin recencia) se
 probó y quedó afuera: en la ablación del último fold, quitarlo dejaba el recall
@@ -53,8 +55,8 @@ Trata cada lectura como una señal implícita con confianza
 
 `(1 + rating / 10) × recencia`
 
-(la misma semivida que el coseno de ocurrencia). Dos algoritmos sobre esa
-matriz usuario × ítem:
+de esa fuente. Dos algoritmos sobre esa matriz usuario × ítem, cada uno con
+sus propios factores, pasos y semivida:
 
 - **ALS** (`implicit.als.AlternatingLeastSquares`): mínimos cuadrados
   alternados. Ajusta factores de usuario e ítem para reconstruir la confianza.
@@ -62,8 +64,12 @@ matriz usuario × ítem:
   observado quede por encima de negativos muestreados. El objetivo es el orden,
   no el valor de la confianza.
 
-Por defecto, 64 factores y 20 iteraciones. En inferencia se usa
-`model.recommend` con `filter_already_liked_items=True`.
+ALS usa 64 factores, 20 iteraciones y regularización 0,01 si no hay
+`als_hyperparameters.json`. BPR usa los mismos números de partida, más
+learning rate 0,01, en `bpr_hyperparameters.json`: no comparte el archivo
+ni los factores con ALS. No se busca `alpha`, porque la confianza ya está
+en la matriz. En inferencia se usa `model.recommend` con
+`filter_already_liked_items=True`.
 
 Librería: [implicit](https://github.com/benfred/implicit) ≥ 0.7.3, SciPy sparse,
 NumPy, pandas.
@@ -74,9 +80,13 @@ NumPy, pandas.
 
 Vectoriza el texto de cada libro (título, autor, género, editorial, resumen y,
 como respaldo, el `id_libro`) con unigramas y bigramas, `min_df=2`,
-`max_df=0.98`, hasta 60.000 términos y TF sublineal. El perfil del lector es
-la suma de los vectores de sus libros, ponderada por `rating / 10` y recencia,
-normalizada a L2. El score es el coseno entre ese perfil y cada libro.
+`max_df=0.98`, TF sublineal y, sin JSON, hasta 60.000 términos. El tope y la
+semivida salen de `tfidf_hyperparameters.json` o de `TfidfConfig`. El perfil
+del lector es la suma de los vectores de sus libros, ponderada por
+`rating / 10` y esa recencia, normalizada a L2. El score es el coseno entre
+ese perfil y cada libro. Unigramas, bigramas, `min_df` y `max_df` no entran
+al study. Si un trial solo cambia la semivida, el vectorizer ya ajustado se
+reusa.
 
 Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 
@@ -89,8 +99,8 @@ ajuste se diagonaliza `XᵀX` y el score es el de esa solución cerrada. λ y
 `min_interactions` no entran al study de `two_stage`. Si existe
 `artifacts/ease_hyperparameters.json`, se usan esos valores; si no, los de
 `EaseConfig`. Cambiarlos pide un `--tune` nuevo. Optuna solo elige el peso
-de la lista. La recencia del perfil es `recency_half_life_days`, la misma
-del resto del retrieval.
+de la lista. La recencia del perfil es `recency_half_life_days`, la de EASE:
+las otras fuentes tienen la suya.
 
 No rellena con popularidad. Esa lista ya es otra fuente, y mezclarla acá
 haría que los mismos libros sumen dos veces en la fusión. Un lector sin
@@ -254,3 +264,22 @@ El study maximiza el NDCG@20 del último fold rolling y escribe
 `tuned_hyperparameters.json`. Sin `--tune`, la corrida siguiente reutiliza ese
 archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
 incluye, y `ease_selected.*` guarda λ y el mínimo.
+
+`item_cosine`, `als`, `bpr` y `tfidf` siguen el mismo contrato, cada uno con
+su `--model` y su archivo (`item_cosine_hyperparameters.json`,
+`als_hyperparameters.json`, `bpr_hyperparameters.json`,
+`tfidf_hyperparameters.json`). El objetivo es el NDCG@20 del último fold. Con
+`tune_on_example_users` ese objetivo mira solo los lectores de `ejemplo.csv`;
+el study de EASE no los filtra. El modelo de una etapa rellena con popularidad
+si no llega a 20. La fuente que entra a `two_stage` no rellena. `two_stage` lee
+el JSON para armar la lista y no lo pisa: solo elige el peso. Un JSON nuevo
+cambia la config del tuneo de fusión, así que hay que buscar de nuevo.
+
+`two_tower` también tiene study. Optuna recorre `embedding_dim` (32–128, log),
+`learning_rate` (1e-4–3e-3, log), `temperature` (0,02–0,2, log) y
+`min_item_reads` (2–20). Cada trial elige las épocas con patience y reentrena;
+el NDCG es el de esa validación. Dropout, weight decay, batch, `recent_reads`
+y `user_authors` quedan en `TwoTowerConfig`. El archivo es
+`two_tower_hyperparameters.json`. Conviene bajar `optuna_trials` para esa
+corrida: cada trial entrena la red. `two_stage` le pasa al proceso hijo la
+config ya resuelta y el hijo no abre el JSON.

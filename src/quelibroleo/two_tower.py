@@ -18,7 +18,8 @@ reentrena de cero sobre toda la historia recibida.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -30,6 +31,13 @@ from .baselines import PopularityRecommender
 from .config import PipelineConfig, TwoTowerConfig
 from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 from .metrics import ndcg_at_k
+from .source_models import (
+    TwoTowerParameters,
+    apply_two_tower_parameters,
+    resolved_two_tower_config,
+    two_tower_resolved_values,
+    write_two_tower_hyperparameters,
+)
 from .split_data import SplitData, validation_folds
 
 LOGGER = logging.getLogger(__name__)
@@ -382,6 +390,141 @@ def top_candidates(
     return known, indices, scores, trained.vocabulary.item_ids
 
 
+def tune_two_tower(
+    history: pd.DataFrame,
+    books: pd.DataFrame,
+    config: PipelineConfig,
+) -> TwoTowerParameters:
+    """Elige dimensión, learning rate, temperatura y el mínimo de lecturas.
+
+    Cada trial corta las épocas con patience sobre el último fold y reentrena
+    con toda la historia. El NDCG@20 es el de esa validación, no el del
+    reentrenamiento. Con ``tune_on_example_users`` la validación mira solo
+    los lectores de ``ejemplo.csv``.
+    """
+
+    try:
+        import optuna
+    except ImportError as exc:
+        raise ImportError("El tuning de two_tower requiere `optuna`") from exc
+
+    prepared = _books_only(history, books)
+    folds = validation_folds(prepared, config)
+    if len(folds) < 2:
+        raise ValueError("Se requieren al menos dos folds para el study de two_tower")
+    search = config.two_tower.search
+
+    def objective(trial: Any) -> float:
+        """NDCG@20 del último fold, con las épocas que elige patience."""
+
+        parameters = TwoTowerParameters(
+            embedding_dim=int(search.embedding_dim.suggest(trial, "embedding_dim")),
+            learning_rate=float(search.learning_rate.suggest(trial, "learning_rate")),
+            temperature=float(search.temperature.suggest(trial, "temperature")),
+            min_item_reads=int(search.min_item_reads.suggest(trial, "min_item_reads")),
+        )
+        _trained, _epochs, score = _fit_once(
+            prepared,
+            books,
+            apply_two_tower_parameters(config, parameters),
+        )
+        LOGGER.info(
+            "two_tower trial %s: dim=%s lr=%.4g temperatura=%.4g mínimo=%s ndcg=%.4f",
+            trial.number,
+            parameters.embedding_dim,
+            parameters.learning_rate,
+            parameters.temperature,
+            parameters.min_item_reads,
+            score,
+        )
+        return score
+
+    from .tracking import log_optuna_plots, optuna_callback, study_name, track_study
+
+    sampler = optuna.samplers.TPESampler(seed=config.random_seed)
+    study = optuna.create_study(
+        study_name=study_name("two_tower"),
+        direction="maximize",
+        sampler=sampler,
+    )
+    with track_study("two_tower"):
+        import mlflow
+
+        if mlflow.active_run() is not None:
+            mlflow.set_tag("model", "two_tower")
+        study.optimize(
+            objective,
+            n_trials=config.optuna_trials,
+            callbacks=[optuna_callback("two_tower")],
+            show_progress_bar=True,
+        )
+        log_optuna_plots(study, "two_tower")
+
+    best = study.best_trial
+    from .tracking import active_run_name
+
+    return TwoTowerParameters(
+        embedding_dim=int(best.params["embedding_dim"]),
+        learning_rate=float(best.params["learning_rate"]),
+        temperature=float(best.params["temperature"]),
+        min_item_reads=int(best.params["min_item_reads"]),
+        run_name=active_run_name(),
+    )
+
+
+def _fit_once(
+    history: pd.DataFrame,
+    books: pd.DataFrame,
+    config: PipelineConfig,
+) -> tuple[Trained, int, float]:
+    """Elige las épocas en el último fold y reentrena. El NDCG es el de la validación."""
+
+    fold = validation_folds(history, config)[-1]
+    users, target = _study_population(config, fold.query_users, fold.target)
+    _, epochs, val_ndcg = train(
+        fold.train,
+        books,
+        config,
+        epochs=config.two_tower.max_epochs,
+        validation=(users, target),
+    )
+    trained, _, _ = train(history, books, config, epochs=epochs)
+    return trained, epochs, val_ndcg
+
+
+def _books_only(history: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
+    prepared = history.astype({USER_COL: str, ITEM_COL: str})
+    return prepared[prepared[ITEM_COL].isin(set(books[ITEM_COL].astype(str)))].copy()
+
+
+def _study_population(
+    config: PipelineConfig,
+    query_users: tuple[str, ...],
+    target: pd.DataFrame,
+) -> tuple[list[str], pd.DataFrame]:
+    """Lectores del objetivo. Con el flag, solo los de ejemplo.csv."""
+
+    from .split_data import example_users
+
+    users = [str(user) for user in query_users]
+    if not config.tune_on_example_users:
+        return users, target
+    allowed = example_users(config)
+    present = [user for user in users if user in allowed]
+    if not present:
+        raise ValueError(
+            "Ningún lector de ejemplo.csv entra al último fold; "
+            "no se puede tunear solo sobre la entrega."
+        )
+    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(drop=True)
+    LOGGER.info(
+        "El study puntúa el último fold en %s lectores de %s",
+        len(present),
+        config.example_path,
+    )
+    return present, truth
+
+
 class TwoTowerModel:
     """Recomendador de una etapa. No usa el retrieval ni LambdaRank de two_stage."""
 
@@ -395,14 +538,30 @@ class TwoTowerModel:
         self._trained: Trained | None = None
 
     def fit(self, split: SplitData, *, tune: bool = False) -> None:
-        """Elige las épocas en el último fold y reentrena con toda ``split.history``."""
+        """Elige las épocas en el último fold y reentrena con toda ``split.history``.
+
+        Con ``tune``, antes busca dimensión, learning rate, temperatura y el
+        mínimo de lecturas. Sin ``tune``, usa el JSON si existe.
+        """
 
         if tune:
-            LOGGER.info("two_tower no tiene study: --tune no cambia sus hiperparámetros")
-        self._trained, epochs, val_ndcg = fit_history(split.history, split.books, self.config)
+            parameters = tune_two_tower(split.history, split.books, self.config)
+            self.hyperparameters_origin = "tune"
+            self.hyperparameters_run_name = parameters.run_name
+            write_two_tower_hyperparameters(self.config, parameters)
+            self.config = apply_two_tower_parameters(self.config, parameters)
+        else:
+            self.config, origin, run_name = resolved_two_tower_config(self.config)
+            self.hyperparameters_origin = origin
+            self.hyperparameters_run_name = run_name if origin == "saved" else ""
+        self._trained, epochs, val_ndcg = fit_history(
+            split.history,
+            split.books,
+            self.config,
+        )
         self.hyperparameters = {
             "model": self.name,
-            **asdict(self.config.two_tower),
+            **two_tower_resolved_values(self.config),
             "epochs": epochs,
             "validation_ndcg_at_20": val_ndcg,
             "n_items": len(self._trained.vocabulary.item_ids),

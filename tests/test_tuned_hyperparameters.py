@@ -162,6 +162,53 @@ def test_saved_ease_parameters_change_the_two_stage_config(tmp_path) -> None:
     assert require_tuned_hyperparameters(off).rrf_cutoff == 40
 
 
+def test_saved_source_parameters_change_the_two_stage_config(tmp_path) -> None:
+    config = PipelineConfig(artifacts_dir=tmp_path)
+    weights = {name: 1.0 for name in config.retrieval.enabled_sources()}
+    ranker = {"learning_rate": 0.05, "num_leaves": 31}
+    record_tuned_hyperparameters(
+        config, rrf_cutoff=100, weights=weights, ranker=ranker
+    )
+
+    (tmp_path / "als_hyperparameters.json").write_text(
+        json.dumps(
+            {
+                "factors": 32,
+                "iterations": 8,
+                "regularization": 0.2,
+                "half_life_days": 90,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="esta config"):
+        require_tuned_hyperparameters(config)
+
+    (tmp_path / "two_tower_hyperparameters.json").write_text(
+        json.dumps(
+            {
+                "embedding_dim": 32,
+                "learning_rate": 0.0004,
+                "temperature": 0.08,
+                "min_item_reads": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    off = replace(
+        config,
+        retrieval=replace(config.retrieval, als_source=False, two_tower_source=False),
+    )
+    record_tuned_hyperparameters(
+        off,
+        rrf_cutoff=40,
+        weights={name: 1.0 for name in off.retrieval.enabled_sources()},
+        ranker=ranker,
+    )
+
+    assert require_tuned_hyperparameters(off).rrf_cutoff == 40
+
+
 def test_restrict_to_example_users_keeps_delivery_readers_in_the_truth() -> None:
     table = RankerTable(
         frame=pd.DataFrame({USER_COL: ["a", "b", "a"], "score_x": [1.0, 2.0, 3.0]}),

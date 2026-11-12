@@ -94,7 +94,7 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     assert (candidates["source"] == "two_tower").all()
 
 
-def test_fit_recommends_unseen_books_and_falls_back_to_popularity() -> None:
+def test_fit_recommends_unseen_books_and_falls_back_to_popularity(tmp_path) -> None:
     history = _history()
     users = tuple(sorted(history["id_lector"].unique()))
     split = SplitData(
@@ -109,6 +109,7 @@ def test_fit_recommends_unseen_books_and_falls_back_to_popularity() -> None:
         quality=DataQualityReport(0, 0, 0, 0, 0, 0, 0, 0),
     )
     config = PipelineConfig(
+        artifacts_dir=tmp_path,
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
         two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=3, patience=1, min_item_reads=1),
     )

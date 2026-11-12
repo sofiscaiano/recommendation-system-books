@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pandas as pd
@@ -111,7 +112,7 @@ def test_default_retrievers_keep_sources_that_change_the_candidate_set() -> None
     assert names == ["popularidad", "item_cosine", "als", "bpr", "tfidf"]
 
 
-def test_source_flags_choose_which_retrievers_are_built() -> None:
+def test_source_flags_choose_which_retrievers_are_built(tmp_path) -> None:
     retrieval = replace(
         RetrievalConfig(),
         als_source=False,
@@ -119,7 +120,7 @@ def test_source_flags_choose_which_retrievers_are_built() -> None:
         two_tower_source=True,
         ease_source=False,
     )
-    config = replace(PipelineConfig(), retrieval=retrieval)
+    config = replace(PipelineConfig(artifacts_dir=tmp_path), retrieval=retrieval)
     names = [retriever.source_name for retriever in retrievers_from_config(config)]
 
     assert names == ["popularidad", "item_cosine", "tfidf", "two_tower"]
@@ -163,6 +164,50 @@ def test_ease_source_reuses_saved_parameters(tmp_path) -> None:
     assert isinstance(ease, EaseRetriever)
     assert ease.parameters.reg_lambda == 12.0
     assert ease.parameters.min_interactions == 30
+
+
+def test_each_source_reuses_its_own_saved_parameters(tmp_path) -> None:
+    (tmp_path / "als_hyperparameters.json").write_text(
+        json.dumps(
+            {
+                "factors": 32,
+                "iterations": 7,
+                "regularization": 0.2,
+                "half_life_days": 90,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "item_cosine_hyperparameters.json").write_text(
+        json.dumps({"half_life_days": 40}),
+        encoding="utf-8",
+    )
+    (tmp_path / "two_tower_hyperparameters.json").write_text(
+        json.dumps(
+            {
+                "embedding_dim": 48,
+                "learning_rate": 0.0004,
+                "temperature": 0.08,
+                "min_item_reads": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = PipelineConfig(artifacts_dir=tmp_path)
+    by_name = {retriever.source_name: retriever for retriever in retrievers_from_config(config)}
+
+    assert by_name["als"].factors == 32
+    assert by_name["als"].iterations == 7
+    assert by_name["als"].regularization == 0.2
+    assert by_name["als"].half_life_days == 90
+    assert by_name["bpr"].factors == 64
+    assert by_name["bpr"].learning_rate == 0.01
+    assert by_name["bpr"].half_life_days == 365
+    assert by_name["item_cosine"].half_life_days == 40
+    assert by_name["tfidf"].max_features == 60_000
+    assert by_name["two_tower"].config.two_tower.embedding_dim == 48
+    assert by_name["two_tower"].config.two_tower.min_item_reads == 4
+    assert by_name["two_tower"].config.two_tower.dropout == config.two_tower.dropout
 
 
 def test_retrieval_config_requires_one_enabled_source() -> None:

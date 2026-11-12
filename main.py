@@ -16,7 +16,7 @@ from quelibroleo.pipeline import train_final_and_submit
 from quelibroleo.serving import export_serving_artifact
 
 app = typer.Typer(
-    help="Recomendador de Qué Libro Leo. --model elige two_stage, popularity, ease o two_tower",
+    help="Recomendador de Qué Libro Leo. --model elige two_stage, popularity o una fuente",
     invoke_without_command=True,
 )
 
@@ -101,8 +101,9 @@ ModelOption = Annotated[
     typer.Option(
         "--model",
         help=(
-            "Algoritmo: two_stage, popularity, ease o two_tower. "
-            "Sin el flag se usa PipelineConfig.model. El corte train/val/test no cambia"
+            "Algoritmo: two_stage, popularity, item_cosine, als, bpr, tfidf, "
+            "ease o two_tower. Sin el flag se usa PipelineConfig.model. "
+            "El corte train/val/test no cambia"
         ),
     ),
 ]

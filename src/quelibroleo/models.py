@@ -11,7 +11,16 @@ from .config import PipelineConfig
 from .data import ITEM_COL, observed_catalog
 from .split_data import SplitData
 
-MODEL_NAMES = ("two_stage", "popularity", "ease", "two_tower")
+MODEL_NAMES = (
+    "two_stage",
+    "popularity",
+    "ease",
+    "two_tower",
+    "item_cosine",
+    "als",
+    "bpr",
+    "tfidf",
+)
 
 
 class Recommender(Protocol):
@@ -74,5 +83,9 @@ def build_model(name: str, config: PipelineConfig) -> Recommender:
         from .two_tower import TwoTowerModel
 
         return TwoTowerModel(config)
+    if name in {"item_cosine", "als", "bpr", "tfidf"}:
+        from .source_models import SourceModel
+
+        return SourceModel(name, config)
     known = ", ".join(MODEL_NAMES)
     raise ValueError(f"Modelo desconocido: {name}. Opciones: {known}")

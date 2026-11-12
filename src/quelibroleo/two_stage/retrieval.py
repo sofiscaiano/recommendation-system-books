@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
@@ -213,6 +213,8 @@ class ImplicitMFRetriever:
         *,
         factors: int = 64,
         iterations: int = 20,
+        regularization: float = 0.01,
+        learning_rate: float = 0.01,
         half_life_days: float = 365.0,
         random_state: int = 42,
     ) -> None:
@@ -222,6 +224,8 @@ class ImplicitMFRetriever:
         self.source_name = algorithm
         self.factors = factors
         self.iterations = iterations
+        self.regularization = regularization
+        self.learning_rate = learning_rate
         self.half_life_days = half_life_days
         self.random_state = random_state
         self.model_: object | None = None
@@ -266,12 +270,15 @@ class ImplicitMFRetriever:
             model = AlternatingLeastSquares(
                 factors=self.factors,
                 iterations=self.iterations,
+                regularization=self.regularization,
                 random_state=self.random_state,
             )
         else:
             model = BayesianPersonalizedRanking(
                 factors=self.factors,
                 iterations=self.iterations,
+                learning_rate=self.learning_rate,
+                regularization=self.regularization,
                 random_state=self.random_state,
                 verify_negative_samples=True,
             )
@@ -609,15 +616,21 @@ class EaseRetriever:
 def build_default_retrievers(
     *,
     random_state: int = 42,
-    implicit_factors: int = 64,
-    implicit_iterations: int = 20,
     half_life_days: float = 365.0,
-    tfidf_max_features: int = 60_000,
+    item_cosine: Any | None = None,
+    als: Any | None = None,
+    bpr: Any | None = None,
+    tfidf: Any | None = None,
     enabled: tuple[str, ...] | None = None,
     two_tower: PipelineConfig | None = None,
     ease: EaseParameters | None = None,
 ) -> list[Retriever]:
-    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y, si se pasan, two-tower y EASE."""
+    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y, si se pasan, two-tower y EASE.
+
+    Sin un objeto de parámetros, cada fuente usa los defaults de hoy y la
+    semivida de `half_life_days`. EASE puntúa con esa misma semivida. Un
+    objeto pisa solo a su fuente: ALS y BPR no comparten factores.
+    """
 
     wanted = None if enabled is None else set(enabled)
     known = {"popularidad", "item_cosine", "als", "bpr", "tfidf", "two_tower", "ease"}
@@ -631,18 +644,32 @@ def build_default_retrievers(
     def include(name: str) -> bool:
         return wanted is None or name in wanted
 
+    cosine_half_life = half_life_days if item_cosine is None else item_cosine.half_life_days
+    als_factors = 64 if als is None else als.factors
+    als_iterations = 20 if als is None else als.iterations
+    als_regularization = 0.01 if als is None else als.regularization
+    als_half_life = half_life_days if als is None else als.half_life_days
+    bpr_factors = 64 if bpr is None else bpr.factors
+    bpr_iterations = 20 if bpr is None else bpr.iterations
+    bpr_learning_rate = 0.01 if bpr is None else bpr.learning_rate
+    bpr_regularization = 0.01 if bpr is None else bpr.regularization
+    bpr_half_life = half_life_days if bpr is None else bpr.half_life_days
+    tfidf_features = 60_000 if tfidf is None else tfidf.max_features
+    tfidf_half_life = half_life_days if tfidf is None else tfidf.half_life_days
+
     sources: list[Retriever] = []
     if include("popularidad"):
         sources.append(PopularityRecommender())
     if include("item_cosine"):
-        sources.append(ItemCosineRetriever(half_life_days=half_life_days))
+        sources.append(ItemCosineRetriever(half_life_days=cosine_half_life))
     if include("als"):
         sources.append(
             ImplicitMFRetriever(
                 "als",
-                factors=implicit_factors,
-                iterations=implicit_iterations,
-                half_life_days=half_life_days,
+                factors=als_factors,
+                iterations=als_iterations,
+                regularization=als_regularization,
+                half_life_days=als_half_life,
                 random_state=random_state,
             )
         )
@@ -650,17 +677,19 @@ def build_default_retrievers(
         sources.append(
             ImplicitMFRetriever(
                 "bpr",
-                factors=implicit_factors,
-                iterations=implicit_iterations,
-                half_life_days=half_life_days,
+                factors=bpr_factors,
+                iterations=bpr_iterations,
+                learning_rate=bpr_learning_rate,
+                regularization=bpr_regularization,
+                half_life_days=bpr_half_life,
                 random_state=random_state,
             )
         )
     if include("tfidf"):
         sources.append(
             TfidfRetriever(
-                max_features=tfidf_max_features,
-                half_life_days=half_life_days,
+                max_features=tfidf_features,
+                half_life_days=tfidf_half_life,
             )
         )
     if two_tower is not None and include("two_tower"):
@@ -673,17 +702,31 @@ def build_default_retrievers(
 
 
 def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
-    """Instancia las fuentes activas con los hiperparámetros fijos del pipeline."""
+    """Instancia las fuentes activas con el JSON de cada una, o con su config."""
+
+    from ..source_models import (
+        als_source_parameters,
+        bpr_source_parameters,
+        item_cosine_source_parameters,
+        resolved_two_tower_config,
+        tfidf_source_parameters,
+    )
 
     retrieval = config.retrieval
+    two_tower = None
+    if retrieval.two_tower_source:
+        two_tower, _origin, _run_name = resolved_two_tower_config(config)
     return build_default_retrievers(
         random_state=config.random_seed,
-        implicit_factors=retrieval.implicit_factors,
-        implicit_iterations=retrieval.implicit_iterations,
         half_life_days=retrieval.recency_half_life_days,
-        tfidf_max_features=retrieval.tfidf_max_features,
+        item_cosine=(
+            item_cosine_source_parameters(config) if retrieval.item_cosine_source else None
+        ),
+        als=als_source_parameters(config) if retrieval.als_source else None,
+        bpr=bpr_source_parameters(config) if retrieval.bpr_source else None,
+        tfidf=tfidf_source_parameters(config) if retrieval.tfidf_source else None,
         enabled=retrieval.enabled_sources(),
-        two_tower=config if retrieval.two_tower_source else None,
+        two_tower=two_tower,
         ease=ease_source_parameters(config) if retrieval.ease_source else None,
     )
 
