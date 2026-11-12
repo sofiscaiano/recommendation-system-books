@@ -118,6 +118,9 @@ class ColumnBuilder:
             + self.smoothing * self.global_mean_
         ) / (item_stats["item_count"] + self.smoothing)
         self.item_stats_ = item_stats
+        self.user_stats_ = _attach_median_popularity(
+            self.user_stats_, enriched, item_stats
+        )
         self.author_stats_ = (
             enriched.groupby("autor", as_index=False)
             .agg(
@@ -199,6 +202,9 @@ class ColumnBuilder:
         user_stats["user_genre_diversity"] = (
             user_stats["user_distinct_genres"] / user_stats["user_count"]
         )
+        user_stats = user_stats.merge(
+            _author_repeat_rate(work), on=USER_COL, how="left"
+        )
         user_stats = _attach_reader_demographics(user_stats, self.readers_)
         user_author = (
             enriched.groupby([USER_COL, "autor"])
@@ -208,6 +214,7 @@ class ColumnBuilder:
             )
             .reset_index()
         )
+        user_author = _attach_author_recency(user_author, enriched, user_stats)
         user_genre = (
             enriched.groupby([USER_COL, "genero"])
             .agg(
@@ -286,7 +293,11 @@ class ColumnBuilder:
         enriched = ordered.merge(metadata, on=ITEM_COL, how="left")
         enriched[["autor", "genero"]] = enriched[["autor", "genero"]].fillna("")
         enriched[RATING_COL] = pd.to_numeric(enriched[RATING_COL])
-        return self._user_activity_tables(enriched)
+        frames = self._user_activity_tables(enriched)
+        frames["user_stats"] = _attach_median_popularity(
+            frames["user_stats"], enriched, self.item_stats_
+        )
+        return frames
 
     def transform(
         self,
@@ -434,6 +445,9 @@ class ColumnBuilder:
         )
         frame["log_item_count"] = np.log1p(frame["item_count"])
         frame["log_user_count"] = np.log1p(frame["user_count"])
+        frame["item_popularity_vs_user"] = np.log1p(frame["item_count"]) - np.log1p(
+            frame["user_median_item_popularity"]
+        )
 
         excluded = {
             USER_COL,
@@ -466,6 +480,95 @@ class ColumnBuilder:
             [np.inf, -np.inf], np.nan
         )
         return RankerTable(frame=frame, feature_columns=feature_columns)
+
+
+def _author_repeat_rate(ordered: pd.DataFrame) -> pd.DataFrame:
+    """Fracción de lecturas, después de la primera, cuyo autor ya había aparecido.
+
+    Un autor vacío no cuenta como lectura ni como autor ya visto. Con una sola
+    lectura con autor el lector no entra y la tasa queda faltante.
+    """
+
+    named = ordered.loc[ordered["autor"].ne(""), [USER_COL, "autor"]].copy()
+    if named.empty:
+        return pd.DataFrame(columns=[USER_COL, "author_repeat_rate"])
+    named["_seen"] = named.groupby([USER_COL, "autor"], sort=False).cumcount() > 0
+    named["_idx"] = named.groupby(USER_COL, sort=False).cumcount()
+    return (
+        named.loc[named["_idx"] > 0]
+        .groupby(USER_COL, sort=False)["_seen"]
+        .mean()
+        .rename("author_repeat_rate")
+        .reset_index()
+    )
+
+
+def _attach_author_recency(
+    user_author: pd.DataFrame,
+    ordered: pd.DataFrame,
+    user_stats: pd.DataFrame,
+) -> pd.DataFrame:
+    """Días desde la última lectura de ese autor y fracción de notas altas.
+
+    Las dos quedan faltantes si el autor está vacío o el lector no lo leyó.
+    Cero días quiere decir que lo leyó el mismo día de su última lectura.
+    """
+
+    named = ordered.loc[
+        ordered["autor"].ne(""), [USER_COL, "autor", RATING_COL, DATE_COL]
+    ]
+    if named.empty:
+        affinity = user_author.copy()
+        affinity["author_high_rating_share"] = np.nan
+        affinity["days_since_author"] = np.nan
+        return affinity
+    high_share = (
+        named.assign(_high=named[RATING_COL] >= 8)
+        .groupby([USER_COL, "autor"], sort=False)["_high"]
+        .mean()
+        .rename("author_high_rating_share")
+        .reset_index()
+    )
+    last_read = (
+        named.groupby([USER_COL, "autor"], sort=False)[DATE_COL]
+        .max()
+        .rename("_last_author_read")
+        .reset_index()
+    )
+    affinity = user_author.merge(high_share, on=[USER_COL, "autor"], how="left")
+    affinity = affinity.merge(last_read, on=[USER_COL, "autor"], how="left")
+    affinity = affinity.merge(
+        user_stats[[USER_COL, "user_last_date"]], on=USER_COL, how="left"
+    )
+    affinity["days_since_author"] = (
+        affinity["user_last_date"] - affinity["_last_author_read"]
+    ).dt.days
+    return affinity.drop(columns=["_last_author_read", "user_last_date"])
+
+
+def _attach_median_popularity(
+    user_stats: pd.DataFrame,
+    history: pd.DataFrame,
+    item_stats: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Mediana de ``item_count`` de los libros que el lector ya leyó."""
+
+    stats = user_stats.drop(columns="user_median_item_popularity", errors="ignore")
+    if item_stats is None or history.empty:
+        stats["user_median_item_popularity"] = np.nan
+        return stats
+    counts = (
+        history[[USER_COL, ITEM_COL]]
+        .drop_duplicates()
+        .merge(item_stats[[ITEM_COL, "item_count"]], on=ITEM_COL, how="left")
+    )
+    median = (
+        counts.groupby(USER_COL, sort=False)["item_count"]
+        .median()
+        .rename("user_median_item_popularity")
+        .reset_index()
+    )
+    return stats.merge(median, on=USER_COL, how="left")
 
 
 def _reader_demographics(readers: pd.DataFrame | None) -> pd.DataFrame | None:

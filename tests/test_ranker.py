@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import log1p
+
 import pandas as pd
 import pytest
 
@@ -80,6 +82,9 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     u1 lee Ana (8), Bea (6) y otra vez Ana (9), con huecos de 4 y 10 días.
     u2 lee Ana (5), Bea (7) y Ciro (10); el primer hueco es 0 y el segundo 31.
     u3 tiene una sola lectura, género `-` y nacimiento vacío.
+    u1 repite a Ana, con notas 8 y 9, y esa es su última lectura: pasaron 0 días
+    y la tasa de repetición es 1/2. u2 no repite autores y leyó a Ana 31 días
+    antes, con nota 5. u3 no tiene segunda lectura, así que la tasa queda vacía.
     Cada lectura mira hasta 5 siguientes. De ahí salen, entre otras,
     P(Ciro|Ana)=1/2, P(Ana|Ana)=1/2, P(Bea|Ana)=1,
     P(Poesia|Novela)=1 y P(Novela|Poesia)=1/2.
@@ -152,6 +157,11 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
         "author_transition_window",
         "genre_transition_window",
         "item_transition_window",
+        "days_since_author",
+        "author_high_rating_share",
+        "user_median_item_popularity",
+        "item_popularity_vs_user",
+        "author_repeat_rate",
     }
     assert added <= set(table.feature_columns)
     assert {
@@ -186,6 +196,11 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u1", "bC1", "genre_transition_window", 5 / 6)
     _expect(frame, "u1", "bC1", "item_transition_prob", None)
     _expect(frame, "u1", "bC1", "item_transition_window", 7 / 24)
+    _expect(frame, "u1", "bC1", "days_since_author", None)
+    _expect(frame, "u1", "bC1", "author_high_rating_share", None)
+    _expect(frame, "u1", "bC1", "user_median_item_popularity", 2)
+    _expect(frame, "u1", "bC1", "item_popularity_vs_user", log1p(1) - log1p(2))
+    _expect(frame, "u1", "bC1", "author_repeat_rate", 0.5)
 
     _expect(frame, "u1", "b_new", "edition_vs_user_mean_year", 14)
     _expect(frame, "u1", "b_new", "user_author_share", 2 / 3)
@@ -198,17 +213,28 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u1", "b_new", "author_transition_window", 0.5)
     _expect(frame, "u1", "b_new", "genre_transition_window", 0.5)
     _expect(frame, "u1", "b_new", "item_transition_window", 0)
+    _expect(frame, "u1", "b_new", "days_since_author", 0)
+    _expect(frame, "u1", "b_new", "author_high_rating_share", 1)
+    _expect(frame, "u1", "b_new", "user_median_item_popularity", 2)
+    _expect(frame, "u1", "b_new", "item_popularity_vs_user", None)
+    _expect(frame, "u1", "b_new", "author_repeat_rate", 0.5)
 
     _expect(frame, "u1", "b_blank", "user_author_share", 0)
     _expect(frame, "u1", "b_blank", "item_author_share", None)
     _expect(frame, "u1", "b_blank", "item_genre_share", None)
     _expect(frame, "u1", "b_blank", "author_mean_rating", None)
+    _expect(frame, "u1", "b_blank", "days_since_author", None)
+    _expect(frame, "u1", "b_blank", "author_high_rating_share", None)
+    _expect(frame, "u1", "b_blank", "item_popularity_vs_user", None)
 
     _expect(frame, "u1", "bA1", "author_mean_rating", ana_mean)
     _expect(frame, "u1", "bA1", "item_author_rating_ratio", 6.5 / ana_mean)
     _expect(frame, "u1", "bA1", "item_author_share", 2 / 3)
     _expect(frame, "u1", "bA1", "item_genre_share", 2 / 3)
     _expect(frame, "u1", "bA1", "user_author_share", 2 / 3)
+    _expect(frame, "u1", "bA1", "days_since_author", 0)
+    _expect(frame, "u1", "bA1", "author_high_rating_share", 1)
+    _expect(frame, "u1", "bA1", "item_popularity_vs_user", 0)
 
     _expect(frame, "u2", "bA2", "user_mean_days_between_reads", 15.5)
     _expect(frame, "u2", "bA2", "user_first_year", 2019)
@@ -230,6 +256,11 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u2", "bA2", "genre_transition_prob", 0.5)
     _expect(frame, "u2", "bA2", "genre_transition_window", 0.5)
     _expect(frame, "u2", "bA2", "item_transition_window", 7 / 24)
+    _expect(frame, "u2", "bA2", "days_since_author", 31)
+    _expect(frame, "u2", "bA2", "author_high_rating_share", 0)
+    _expect(frame, "u2", "bA2", "user_median_item_popularity", 2)
+    _expect(frame, "u2", "bA2", "item_popularity_vs_user", log1p(1) - log1p(2))
+    _expect(frame, "u2", "bA2", "author_repeat_rate", 0)
 
     _expect(frame, "u3", "bA1", "user_mean_days_between_reads", None)
     _expect(frame, "u3", "bA1", "user_first_year", 2021)
@@ -245,6 +276,11 @@ def test_new_ranker_columns_match_hand_calculation() -> None:
     _expect(frame, "u3", "bA1", "author_transition_window", 0)
     _expect(frame, "u3", "bA1", "genre_transition_window", 0)
     _expect(frame, "u3", "bA1", "recent_author_share", 0)
+    _expect(frame, "u3", "bA1", "days_since_author", None)
+    _expect(frame, "u3", "bA1", "author_high_rating_share", None)
+    _expect(frame, "u3", "bA1", "user_median_item_popularity", 1)
+    _expect(frame, "u3", "bA1", "item_popularity_vs_user", log1p(2) - log1p(1))
+    _expect(frame, "u3", "bA1", "author_repeat_rate", None)
 
 
 def test_transition_window_renormalizes_when_history_has_two_reads() -> None:
