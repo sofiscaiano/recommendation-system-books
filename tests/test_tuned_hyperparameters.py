@@ -111,7 +111,7 @@ def test_legacy_file_with_another_population_is_not_reused(tmp_path) -> None:
 
 def test_history_reuses_the_matching_config_not_the_latest(tmp_path) -> None:
     base = PipelineConfig(artifacts_dir=tmp_path)
-    other = replace(base, ranker=replace(base.ranker, label_gain="exponential"))
+    other = replace(base, ranker=replace(base.ranker, label_gain="linear"))
     weights = {name: 1.0 for name in base.retrieval.enabled_sources()}
     ranker = {"learning_rate": 0.05, "num_leaves": 31}
     record_tuned_hyperparameters(
@@ -130,6 +130,36 @@ def test_history_reuses_the_matching_config_not_the_latest(tmp_path) -> None:
         require_tuned_hyperparameters(
             replace(base, retrieval=replace(base.retrieval, rrf_k=40.0))
         )
+
+
+def test_saved_ease_parameters_change_the_two_stage_config(tmp_path) -> None:
+    config = PipelineConfig(artifacts_dir=tmp_path)
+    weights = {name: 1.0 for name in config.retrieval.enabled_sources()}
+    ranker = {"learning_rate": 0.05, "num_leaves": 31}
+    record_tuned_hyperparameters(
+        config, rrf_cutoff=100, weights=weights, ranker=ranker
+    )
+
+    assert require_tuned_hyperparameters(config).rrf_cutoff == 100
+
+    (tmp_path / "ease_hyperparameters.json").write_text(
+        json.dumps(
+            {"reg_lambda": 12.0, "min_interactions": 30, "weight_mode": "rating"}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="esta config"):
+        require_tuned_hyperparameters(config)
+
+    off = replace(config, retrieval=replace(config.retrieval, ease_source=False))
+    record_tuned_hyperparameters(
+        off,
+        rrf_cutoff=40,
+        weights={name: 1.0 for name in off.retrieval.enabled_sources()},
+        ranker=ranker,
+    )
+
+    assert require_tuned_hyperparameters(off).rrf_cutoff == 40
 
 
 def test_restrict_to_example_users_keeps_delivery_readers_in_the_truth() -> None:

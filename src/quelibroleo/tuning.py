@@ -13,6 +13,7 @@ import pandas as pd
 
 from .config import LABEL_GAIN_MODES, PipelineConfig, search_ranges
 from .data import USER_COL
+from .ease import ease_source_parameters
 from .metrics import ndcg_at_k
 from .split_data import example_users
 from .two_stage.columns import RankerTable
@@ -69,7 +70,8 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
 
     No entran la nota, la carpeta de artefactos ni la ruta de la entrega: no
     cambian el study. `example_path` entra solo si el objetivo usa esos lectores.
-    El two-tower entra solo si es una fuente.
+    El two-tower entra solo si es una fuente. EASE entra con los tres valores
+    con los que se arma la matriz, los del JSON o los de `EaseConfig`.
     """
 
     retrieval = config.retrieval
@@ -101,6 +103,13 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
     }
     if retrieval.two_tower_source:
         fingerprint["two_tower"] = asdict(config.two_tower)
+    if retrieval.ease_source:
+        parameters = ease_source_parameters(config)
+        fingerprint["ease"] = {
+            "reg_lambda": parameters.reg_lambda,
+            "min_interactions": parameters.min_interactions,
+            "weight_mode": parameters.weight_mode,
+        }
     return fingerprint
 
 

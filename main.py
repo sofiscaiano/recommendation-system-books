@@ -73,6 +73,18 @@ TwoTowerSourceOption = Annotated[
         ),
     ),
 ]
+EaseSourceOption = Annotated[
+    bool | None,
+    typer.Option(
+        "--ease-source/--no-ease-source",
+        help=(
+            "Prende o apaga EASE como fuente de retrieval. "
+            "Sin el flag se usa RetrievalConfig.ease_source. "
+            "Prenderlo por primera vez exige --tune. "
+            "λ, el mínimo de lecturas y el peso salen del JSON de EASE o de EaseConfig"
+        ),
+    ),
+]
 TuneOnExampleUsersOption = Annotated[
     bool | None,
     typer.Option(
@@ -120,6 +132,7 @@ def _config(
     label_gain: str | None,
     model: str | None,
     two_tower_source: bool | None = None,
+    ease_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> PipelineConfig:
     """Arma la config de la corrida con las rutas, la nota y el modelo."""
@@ -128,6 +141,8 @@ def _config(
     retrieval = base.retrieval
     if two_tower_source is not None:
         retrieval = replace(retrieval, two_tower_source=two_tower_source)
+    if ease_source is not None:
+        retrieval = replace(retrieval, ease_source=ease_source)
     ranker = base.ranker
     if label_gain is not None:
         ranker = replace(ranker, label_gain=label_gain)
@@ -163,6 +178,7 @@ def _run(
     label_gain: str | None,
     model: str | None,
     two_tower_source: bool | None = None,
+    ease_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> None:
     """Ejecuta evaluate, submit o ambos con la misma configuración."""
@@ -180,6 +196,7 @@ def _run(
         label_gain,
         model,
         two_tower_source,
+        ease_source,
         tune_on_example_users,
     )
     logger = logging.getLogger(__name__)
@@ -249,6 +266,7 @@ def evaluate(
     label_gain: LabelGainOption = None,
     model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
+    ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa el leave-last-20 y escribe artifacts/."""
@@ -265,6 +283,7 @@ def evaluate(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        ease_source=ease_source,
         tune_on_example_users=tune_on_example_users,
     )
 
@@ -281,6 +300,7 @@ def submit(
     label_gain: LabelGainOption = None,
     model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
+    ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Reentrena con toda la historia y escribe submission.csv."""
@@ -297,6 +317,7 @@ def submit(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        ease_source=ease_source,
         tune_on_example_users=tune_on_example_users,
     )
 
@@ -313,6 +334,7 @@ def run_all(
     label_gain: LabelGainOption = None,
     model: ModelOption = None,
     two_tower_source: TwoTowerSourceOption = None,
+    ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
     """Evalúa y después genera la entrega."""
@@ -329,6 +351,7 @@ def run_all(
         label_gain=label_gain,
         model=model,
         two_tower_source=two_tower_source,
+        ease_source=ease_source,
         tune_on_example_users=tune_on_example_users,
     )
 

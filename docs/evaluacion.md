@@ -144,7 +144,8 @@ Con `--tune`, Optuna no los pisa acá: el resultado de la búsqueda queda en
 
 Lista de cada `evaluate --tune` de `two_stage`. Cada entrada guarda la config
 con la que se buscó (fuentes, `label_gain`, semilla, split, `rrf_k`, intervalos
-de búsqueda y, si esa fuente está prendida, el two-tower), el corte de RRF,
+de búsqueda y, si esa fuente está prendida, el two-tower o los tres valores de
+EASE), el corte de RRF,
 los pesos normalizados y LambdaRank. No se reemplazan las entradas anteriores.
 
 Sin `--tune`, `evaluate` y `submit` recorren la lista y entrenan con la última

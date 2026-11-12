@@ -74,7 +74,7 @@ class RetrievalConfig:
     sin peso en el tuneo guardado hace fallar la corrida.
     """
 
-    rrf_k: float = 60.0
+    rrf_k: float = 60.0  # valor estandar
     recency_half_life_days: float = 365.0
     implicit_factors: int = 64
     implicit_iterations: int = 20
@@ -85,6 +85,7 @@ class RetrievalConfig:
     bpr_source: bool = True
     tfidf_source: bool = True
     two_tower_source: bool = True
+    ease_source: bool = True
     search: RetrievalSearch = field(default_factory=RetrievalSearch)
 
     def enabled_sources(self) -> tuple[str, ...]:
@@ -97,6 +98,7 @@ class RetrievalConfig:
             ("bpr", self.bpr_source),
             ("tfidf", self.tfidf_source),
             ("two_tower", self.two_tower_source),
+            ("ease", self.ease_source),
         )
         return tuple(name for name, enabled in flags if enabled)
 
@@ -141,7 +143,11 @@ EASE_WEIGHT_MODES = ("binary", "rating", "confidence")
 
 @dataclass(frozen=True)
 class EaseSearch:
-    """Hiperparámetros de EASE que Optuna recorre. No los usa `two_stage`."""
+    """Hiperparámetros que recorre el study de `--model ease`.
+
+    `two_stage` no los busca. La fuente usa el JSON de EASE o los valores fijos,
+    y Optuna solo elige el peso de esa lista en la fusión.
+    """
 
     reg_lambda: SearchRange = field(
         default_factory=lambda: SearchRange(1.0, 100_000.0, log=True)
@@ -153,11 +159,13 @@ class EaseSearch:
 
 @dataclass(frozen=True)
 class EaseConfig:
-    """EASE como modelo único. El peso de la matriz no entra al intervalo numérico.
+    """Valores fijos de EASE. El peso de la matriz no entra al intervalo numérico.
 
     `binary` pone unos, `rating` el valor 1–10 y `confidence` la misma
-    confianza de ALS: `(1 + rating / 10)` por recencia. Sin `--tune` se usan
-    estos tres valores. La búsqueda escribe otro archivo que el de LambdaRank.
+    confianza de ALS: `(1 + rating / 10)` por recencia. El modelo `ease` los
+    usa si no hay JSON. Con `retrieval.ease_source`, two_stage arma la misma
+    matriz: el JSON de un tuneo de EASE gana y, si no está, valen estos tres.
+    La búsqueda de EASE escribe otro archivo que el de LambdaRank.
     """
 
     reg_lambda: float = 500.0
@@ -230,7 +238,7 @@ class RankerConfig:
     reg_alpha: float = 0.0
     reg_lambda: float = 1.0
     early_stopping_rounds: int = 30
-    label_gain: str = "linear"
+    label_gain: str = "exponential"
     search: RankerSearch = field(default_factory=RankerSearch)
 
     def __post_init__(self) -> None:

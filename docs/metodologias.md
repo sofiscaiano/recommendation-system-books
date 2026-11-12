@@ -80,6 +80,28 @@ normalizada a L2. El score es el coseno entre ese perfil y cada libro.
 
 Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 
+### EASE
+
+`EaseRetriever` (`src/quelibroleo/two_stage/retrieval.py`), fuente `ease`.
+
+Misma matriz ítem-ítem que el modelo de una etapa (Steck, WWW 2019): en el
+ajuste se diagonaliza `XᵀX` y el score es el de esa solución cerrada. λ,
+`min_interactions` y `weight_mode` no entran al study de `two_stage`. Si
+existe `artifacts/ease_hyperparameters.json`, se usan esos valores; si no,
+los de `EaseConfig`. Esos tres forman parte de la config del tuneo: cambiarlos
+pide un `--tune` nuevo. Optuna solo elige el peso de la lista.
+
+No rellena con popularidad. Esa lista ya es otra fuente, y mezclarla acá
+haría que los mismos libros sumen dos veces en la fusión. Un lector sin
+lecturas entre los libros del modelo no aporta candidatos.
+
+`RetrievalConfig.ease_source` la prende (por defecto, sí). `--ease-source` y
+`--no-ease-source` la pisan en esa corrida. La primera vez que queda prendida
+hace falta `--tune`: un tuneo anterior no tiene peso para esta fuente.
+
+El detalle de la solución cerrada y del study propio está más abajo, en EASE
+como modelo único.
+
 ### Fusión: Reciprocal Rank Fusion y un corte
 
 `CandidateFusion`.
@@ -191,6 +213,8 @@ pasan a NaN; LightGBM los trata como faltantes.
 `EaseModel` (`src/quelibroleo/ease.py`), modelo `ease`. Es un recomendador de
 una etapa: no arma candidatos ni llama a LambdaRank. Se elige con
 `--model ease` y usa el mismo corte, el mismo top-20 y el mismo NDCG@20.
+La misma matriz también puede ser una fuente de `two_stage`; en ese papel
+no completa con popularidad (ver Retrieval).
 
 Aprende una matriz ítem-ítem **B** que reconstruye la fila del lector,
 `x̂ = x B`, con la diagonal en cero (Steck, WWW 2019). La solución es cerrada:

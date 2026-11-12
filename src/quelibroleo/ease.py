@@ -1,8 +1,12 @@
-"""EASE: un solo modelo ítem-ítem, sin retrieval ni LambdaRank.
+"""EASE: matriz ítem-ítem de Steck (WWW 2019).
 
-La solución es la de Steck (WWW 2019). Con la matriz de interacciones X
-(lectores × libros) se aprende B tal que la predicción es X B, la diagonal
-de B es cero y el ajuste es error cuadrático más una penalización L2.
+Con la matriz de interacciones X (lectores × libros) se aprende B tal que
+la predicción es X B, la diagonal de B es cero y el ajuste es error
+cuadrático más una penalización L2.
+
+`EaseModel` es el recomendador de una etapa. `EaseRetriever`, en
+`two_stage/retrieval.py`, usa la misma matriz como fuente de `two_stage`
+y no rellena con popularidad: esa lista ya es otra fuente.
 """
 
 from __future__ import annotations
@@ -100,23 +104,36 @@ def parameters_from_config(config: EaseConfig) -> EaseParameters:
     )
 
 
+def ease_source_parameters(config: PipelineConfig) -> EaseParameters:
+    """Parámetros de la matriz, como modelo único o como fuente de two_stage.
+
+    El JSON de un `--model ease --tune` gana. Si no está, valen los de
+    `EaseConfig`. two_stage no vuelve a buscar estos tres: solo elige el peso.
+    """
+
+    path = ease_hyperparameters_path(config.artifacts_dir)
+    if path.is_file():
+        return load_ease_hyperparameters(path)
+    return parameters_from_config(config.ease)
+
+
 def resolve_ease_parameters(config: PipelineConfig) -> tuple[EaseParameters, str]:
     """Devuelve el tuneo de EASE, o los valores fijos si ese archivo no existe."""
 
     path = ease_hyperparameters_path(config.artifacts_dir)
+    parameters = ease_source_parameters(config)
     if path.is_file():
-        loaded = load_ease_hyperparameters(path)
         LOGGER.info(
             "Reusando EASE de %s (corrida %s, λ=%s, mínimo=%s, peso=%s)",
             path,
-            loaded.run_name or "sin nombre",
-            loaded.reg_lambda,
-            loaded.min_interactions,
-            loaded.weight_mode,
+            parameters.run_name or "sin nombre",
+            parameters.reg_lambda,
+            parameters.min_interactions,
+            parameters.weight_mode,
         )
-        return loaded, "saved"
+        return parameters, "saved"
     LOGGER.info("Sin %s; EASE usa los hiperparámetros fijos", path)
-    return parameters_from_config(config.ease), "default"
+    return parameters, "default"
 
 
 def _row_weights(
@@ -314,20 +331,20 @@ class _SpectrumCache:
         return spectrum
 
 
-def _recommend_frame(
+def ease_ranking(
     history: pd.DataFrame,
     users: list[str],
     spectrum: EaseSpectrum,
     parameters: EaseParameters,
-    popularity: PopularityRecommender,
     *,
     half_life_days: float,
     n: int,
 ) -> pd.DataFrame:
-    """Top-n de EASE y, si no alcanza, popularidad sin repetir ni recomendar leídos."""
+    """Top-n de la matriz, sin popularidad y sin lectores que no aportan peso."""
 
-    if not users:
-        return pd.DataFrame(columns=[USER_COL, ITEM_COL, "score", "rank"])
+    columns = [USER_COL, ITEM_COL, "score", "rank"]
+    if not users or n <= 0 or len(spectrum.item_ids) == 0:
+        return pd.DataFrame(columns=columns)
     unique = list(dict.fromkeys(users))
     matrix = _matrix_for_users(
         history,
@@ -345,28 +362,75 @@ def _recommend_frame(
             parameters.reg_lambda,
         )
     totals = np.asarray(matrix.sum(axis=1)).ravel()
-    by_user = {
-        user: (row, total > 0)
-        for user, row, total in zip(unique, scored, totals, strict=True)
-    }
-    seen = history.groupby(USER_COL, sort=False)[ITEM_COL].agg(set).to_dict()
+    if history.empty:
+        seen: dict[object, set[str]] = {}
+    else:
+        seen = history.groupby(USER_COL, sort=False)[ITEM_COL].agg(set).to_dict()
+    rows: list[dict[str, object]] = []
+    for user, row, total in zip(unique, scored, totals, strict=True):
+        if total <= 0:
+            continue
+        chosen = _top_unseen(
+            spectrum.item_ids,
+            row,
+            set(seen.get(user, set())),
+            n,
+        )
+        for rank, (item, score) in enumerate(chosen, start=1):
+            rows.append(
+                {
+                    USER_COL: user,
+                    ITEM_COL: item,
+                    "score": score,
+                    "rank": rank,
+                }
+            )
+    return pd.DataFrame.from_records(rows, columns=columns)
+
+
+def _recommend_frame(
+    history: pd.DataFrame,
+    users: list[str],
+    spectrum: EaseSpectrum,
+    parameters: EaseParameters,
+    popularity: PopularityRecommender,
+    *,
+    half_life_days: float,
+    n: int,
+) -> pd.DataFrame:
+    """Top-n de EASE y, si no alcanza, popularidad sin repetir ni recomendar leídos."""
+
+    columns = [USER_COL, ITEM_COL, "score", "rank"]
+    if not users:
+        return pd.DataFrame(columns=columns)
+    ranked = ease_ranking(
+        history,
+        users,
+        spectrum,
+        parameters,
+        half_life_days=half_life_days,
+        n=n,
+    )
+    by_user: dict[object, list[tuple[str, float]]] = {}
+    if not ranked.empty:
+        for user, group in ranked.groupby(USER_COL, sort=False):
+            by_user[user] = list(
+                zip(group[ITEM_COL].tolist(), group["score"].tolist(), strict=True)
+            )
+    unique = list(dict.fromkeys(users))
     fallback = popularity.recommend(unique, history, n=n)
     if fallback.empty:
-        fallback_by_user: dict[str, list[str]] = {}
+        fallback_by_user: dict[object, list[str]] = {}
     else:
         fallback_by_user = fallback.groupby(USER_COL)[ITEM_COL].agg(list).to_dict()
+    if history.empty:
+        seen: dict[object, set[object]] = {}
+    else:
+        seen = history.groupby(USER_COL, sort=False)[ITEM_COL].agg(set).to_dict()
     rows: list[dict[str, object]] = []
     for user in users:
-        row, has_history = by_user[user]
-        chosen: list[tuple[str, float]] = []
-        if has_history:
-            chosen = _top_unseen(
-                spectrum.item_ids,
-                row,
-                set(seen.get(user, set())),
-                n,
-            )
-        already = {item for item, _ in chosen}
+        chosen = list(by_user.get(user, []))
+        already = {item for item, _score in chosen}
         for item in fallback_by_user.get(user, []):
             if len(chosen) >= n:
                 break
@@ -383,10 +447,7 @@ def _recommend_frame(
                     "rank": rank,
                 }
             )
-    return pd.DataFrame.from_records(
-        rows,
-        columns=[USER_COL, ITEM_COL, "score", "rank"],
-    )
+    return pd.DataFrame.from_records(rows, columns=columns)
 
 
 def _in_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:

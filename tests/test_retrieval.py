@@ -7,8 +7,10 @@ import pytest
 
 from quelibroleo.baselines import PopularityRecommender
 from quelibroleo.config import PipelineConfig, RetrievalConfig
+from quelibroleo.ease import EaseParameters
 from quelibroleo.two_stage.retrieval import (
     CandidateFusion,
+    EaseRetriever,
     ItemCosineRetriever,
     build_default_retrievers,
     per_source_depth,
@@ -115,11 +117,53 @@ def test_source_flags_choose_which_retrievers_are_built() -> None:
         als_source=False,
         bpr_source=False,
         two_tower_source=True,
+        ease_source=False,
     )
     config = replace(PipelineConfig(), retrieval=retrieval)
     names = [retriever.source_name for retriever in retrievers_from_config(config)]
 
     assert names == ["popularidad", "item_cosine", "tfidf", "two_tower"]
+
+
+def test_ease_retriever_ranks_neighbors_and_does_not_pad_with_popularity() -> None:
+    interactions, catalog = tiny_data()
+    source = EaseRetriever(
+        EaseParameters(reg_lambda=1.0, min_interactions=1, weight_mode="binary"),
+        half_life_days=365.0,
+    ).fit(interactions, catalog)
+
+    candidates = source.recommend(["u1", "nuevo"], interactions, n=10)
+
+    assert list(candidates.columns) == [
+        "id_lector",
+        "id_libro",
+        "source",
+        "score",
+        "rank",
+    ]
+    assert set(candidates["id_lector"]) == {"u1"}
+    assert candidates["id_libro"].tolist() == ["b3", "b4"]
+    assert candidates["rank"].tolist() == [1, 2]
+    assert set(candidates["id_libro"]).isdisjoint({"b1", "b2"})
+    assert (candidates["source"] == "ease").all()
+
+
+def test_ease_source_reuses_saved_parameters(tmp_path) -> None:
+    (tmp_path / "ease_hyperparameters.json").write_text(
+        '{"reg_lambda": 12.0, "min_interactions": 30, "weight_mode": "rating"}\n',
+        encoding="utf-8",
+    )
+    config = PipelineConfig(artifacts_dir=tmp_path)
+    ease = next(
+        retriever
+        for retriever in retrievers_from_config(config)
+        if retriever.source_name == "ease"
+    )
+
+    assert isinstance(ease, EaseRetriever)
+    assert ease.parameters.reg_lambda == 12.0
+    assert ease.parameters.min_interactions == 30
+    assert ease.parameters.weight_mode == "rating"
 
 
 def test_retrieval_config_requires_one_enabled_source() -> None:
@@ -132,6 +176,7 @@ def test_retrieval_config_requires_one_enabled_source() -> None:
             bpr_source=False,
             tfidf_source=False,
             two_tower_source=False,
+            ease_source=False,
         )
 
 

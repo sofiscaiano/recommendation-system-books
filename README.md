@@ -76,8 +76,8 @@ uv run python main.py submit --note "entrega con el tuneo guardado"
 cuya config coincide (fuentes, `label_gain`, semilla, split, `rrf_k` y el
 resto de lo que el study no elige). Si no hay ninguna, hay que correr
 `evaluate --tune`. El de `ease` escribe `artifacts/ease_hyperparameters.json`
-y, si no tiene archivo, usa los valores de `EaseConfig`. Una corrida no pisa
-ni lee el archivo del otro modelo.
+y, si no tiene archivo, usa los valores de `EaseConfig`. `two_stage` no pisa
+ese JSON. Si EASE está prendido como fuente, lo lee para armar la matriz.
 
 `RankerConfig.label_gain` elige la ganancia de LambdaRank: `linear` (defecto,
 identidad 0..10) o `exponential` (`2^rel-1`, igual que el NDCG de evaluación).
@@ -143,7 +143,7 @@ usar el hold-out final.
 El detalle de cada método, pesos y librerías está en
 [`docs/metodologias.md`](docs/metodologias.md). El sistema tiene dos etapas:
 
-1. **Retrieval**: popularidad, item-item por coseno, ALS, BPR y perfil TF-IDF.
+1. **Retrieval**: popularidad, item-item por coseno, ALS, BPR, perfil TF-IDF, two-tower y EASE.
    Las fuentes se combinan con Reciprocal Rank Fusion ponderado. El corte y
    los pesos son los del último `--tune` (Optuna recorre el corte entre 100 y
    1.000).

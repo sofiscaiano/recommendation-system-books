@@ -83,7 +83,7 @@ def test_scores_match_the_closed_form() -> None:
     assert scores == pytest.approx(_closed_form(matrix, 5.0), rel=1e-6, abs=1e-6)
 
 
-def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books() -> None:
+def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books(tmp_path) -> None:
     rows = [("u1", "a", "2020-01-01", 8), ("u1", "b", "2020-01-02", 8)]
     for index, user in enumerate(("u2", "u3", "u4"), start=3):
         rows.append((user, "a", f"2020-02-0{index}", 8))
@@ -93,7 +93,8 @@ def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books() -> None:
     rows.append(("u6", "a", "2020-05-01", 9))
     frame = _frame(rows)
     config = PipelineConfig(
-        ease=EaseConfig(reg_lambda=1.0, min_interactions=1, weight_mode="binary")
+        artifacts_dir=tmp_path,
+        ease=EaseConfig(reg_lambda=1.0, min_interactions=1, weight_mode="binary"),
     )
     model = build_model("ease", config)
     model.fit(_split(frame), tune=False)
@@ -107,7 +108,7 @@ def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books() -> None:
     assert set(model._spectrum.item_ids) == {"a", "b", "c"}
 
 
-def test_reader_without_history_follows_popularity() -> None:
+def test_reader_without_history_follows_popularity(tmp_path) -> None:
     frame = _frame(
         [
             ("u1", "popular", "2020-01-01", 8),
@@ -116,7 +117,8 @@ def test_reader_without_history_follows_popularity() -> None:
         ]
     )
     config = PipelineConfig(
-        ease=EaseConfig(reg_lambda=10.0, min_interactions=1, weight_mode="binary")
+        artifacts_dir=tmp_path,
+        ease=EaseConfig(reg_lambda=10.0, min_interactions=1, weight_mode="binary"),
     )
     model = build_model("ease", config)
     model.fit(_split(frame), tune=False)

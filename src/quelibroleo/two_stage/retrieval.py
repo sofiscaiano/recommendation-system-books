@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -14,6 +15,16 @@ from sklearn.preprocessing import normalize
 from ..baselines import PopularityRecommender
 from ..config import PipelineConfig
 from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
+from ..ease import (
+    EaseParameters,
+    EaseSpectrum,
+    ease_ranking,
+    ease_source_parameters,
+    interaction_matrix,
+    spectrum_from_matrix,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 CANDIDATE_COLUMNS = [USER_COL, ITEM_COL, "source", "score", "rank"]
 
@@ -534,6 +545,69 @@ class TwoTowerRetriever:
         )
 
 
+class EaseRetriever:
+    """EASE como fuente. La matriz se ajusta en este proceso.
+
+    λ, el mínimo de lecturas y el peso de la matriz no los elige el study de
+    two_stage: salen del JSON de EASE o de `EaseConfig`. No rellena con
+    popularidad. Un lector sin peso en los libros del modelo no aporta filas.
+    """
+
+    source_name = "ease"
+
+    def __init__(self, parameters: EaseParameters, *, half_life_days: float) -> None:
+        self.parameters = parameters
+        self.half_life_days = half_life_days
+        self._spectrum: EaseSpectrum | None = None
+
+    def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> EaseRetriever:
+        """Diagonaliza XᵀX con los libros del catálogo que pasan el mínimo."""
+
+        eligible = set(catalog[ITEM_COL].astype(str))
+        fit_data = interactions.loc[interactions[ITEM_COL].astype(str).isin(eligible)].copy()
+        fit_data[USER_COL] = fit_data[USER_COL].astype(str)
+        fit_data[ITEM_COL] = fit_data[ITEM_COL].astype(str)
+        matrix, item_ids = interaction_matrix(
+            fit_data,
+            min_interactions=self.parameters.min_interactions,
+            weight_mode=self.parameters.weight_mode,
+            half_life_days=self.half_life_days,
+        )
+        LOGGER.info(
+            "EASE como fuente: %s libros (λ=%s, mínimo=%s, peso=%s)",
+            len(item_ids),
+            self.parameters.reg_lambda,
+            self.parameters.min_interactions,
+            self.parameters.weight_mode,
+        )
+        self._spectrum = spectrum_from_matrix(matrix, item_ids)
+        return self
+
+    def recommend(
+        self,
+        users: list[str] | tuple[str, ...],
+        history: pd.DataFrame,
+        n: int,
+    ) -> pd.DataFrame:
+        """Top-n de la matriz ya ajustada, sin los libros que el lector ya vio."""
+
+        if self._spectrum is None:
+            raise RuntimeError("El retriever debe entrenarse antes de recomendar")
+        ranked = ease_ranking(
+            history,
+            list(users),
+            self._spectrum,
+            self.parameters,
+            half_life_days=self.half_life_days,
+            n=n,
+        )
+        if ranked.empty:
+            return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+        ranked = ranked.copy()
+        ranked["source"] = self.source_name
+        return ranked[CANDIDATE_COLUMNS]
+
+
 def build_default_retrievers(
     *,
     random_state: int = 42,
@@ -543,11 +617,12 @@ def build_default_retrievers(
     tfidf_max_features: int = 60_000,
     enabled: tuple[str, ...] | None = None,
     two_tower: PipelineConfig | None = None,
+    ease: EaseParameters | None = None,
 ) -> list[Retriever]:
-    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y el two-tower si se pasa."""
+    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y, si se pasan, two-tower y EASE."""
 
     wanted = None if enabled is None else set(enabled)
-    known = {"popularidad", "item_cosine", "als", "bpr", "tfidf", "two_tower"}
+    known = {"popularidad", "item_cosine", "als", "bpr", "tfidf", "two_tower", "ease"}
     if wanted is not None:
         unknown = sorted(wanted - known)
         if unknown:
@@ -592,6 +667,8 @@ def build_default_retrievers(
         )
     if two_tower is not None and include("two_tower"):
         sources.append(TwoTowerRetriever(two_tower))
+    if ease is not None and include("ease"):
+        sources.append(EaseRetriever(ease, half_life_days=half_life_days))
     if not sources:
         raise ValueError("al menos una fuente de retrieval tiene que estar activa")
     return sources
@@ -609,6 +686,7 @@ def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
         tfidf_max_features=retrieval.tfidf_max_features,
         enabled=retrieval.enabled_sources(),
         two_tower=config if retrieval.two_tower_source else None,
+        ease=ease_source_parameters(config) if retrieval.ease_source else None,
     )
 
 
