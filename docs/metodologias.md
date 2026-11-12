@@ -262,15 +262,17 @@ ignora.
 El study maximiza el NDCG@20 del último fold rolling y escribe
 `artifacts/ease_hyperparameters.json`. No lee ni reemplaza
 `tuned_hyperparameters.json`. Sin `--tune`, la corrida siguiente reutiliza ese
-archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
-incluye, y `ease_selected.*` guarda λ y el mínimo.
+archivo. Con `tune_on_example_users` ese NDCG mira solo los lectores de
+`ejemplo.csv`, igual que el resto de los studies. En MLflow el tag `model`
+vale `ease`, el nombre de la corrida lo incluye, y `ease_selected.*` guarda λ
+y el mínimo.
 
 `item_cosine`, `als`, `bpr` y `tfidf` siguen el mismo contrato, cada uno con
 su `--model` y su archivo (`item_cosine_hyperparameters.json`,
 `als_hyperparameters.json`, `bpr_hyperparameters.json`,
 `tfidf_hyperparameters.json`). El objetivo es el NDCG@20 del último fold. Con
-`tune_on_example_users` ese objetivo mira solo los lectores de `ejemplo.csv`;
-el study de EASE no los filtra. El modelo de una etapa rellena con popularidad
+`tune_on_example_users` ese objetivo mira solo los lectores de `ejemplo.csv`.
+El modelo de una etapa rellena con popularidad
 si no llega a 20. La fuente que entra a `two_stage` no rellena. `two_stage` lee
 el JSON para armar la lista y no lo pisa: solo elige el peso. Un JSON nuevo
 cambia la config del tuneo de fusión, así que hay que buscar de nuevo.

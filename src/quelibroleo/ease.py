@@ -30,7 +30,7 @@ from .baselines import PopularityRecommender
 from .config import EaseConfig, PipelineConfig
 from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, observed_catalog
 from .metrics import ndcg_at_k
-from .split_data import SplitData, validation_folds
+from .split_data import SplitData, example_users, validation_folds
 
 LOGGER = logging.getLogger(__name__)
 EASE_HYPERPARAMETERS_FILE = "ease_hyperparameters.json"
@@ -432,6 +432,32 @@ def _recommend_frame(
     return pd.DataFrame.from_records(rows, columns=columns)
 
 
+def _study_population(
+    config: PipelineConfig,
+    query_users: tuple[str, ...],
+    target: pd.DataFrame,
+) -> tuple[list[str], pd.DataFrame]:
+    """Lectores del objetivo. Con el flag, solo los de ejemplo.csv."""
+
+    users = [str(user) for user in query_users]
+    if not config.tune_on_example_users:
+        return users, target
+    allowed = example_users(config)
+    present = [user for user in users if user in allowed]
+    if not present:
+        raise ValueError(
+            "Ningún lector de ejemplo.csv entra al último fold; "
+            "no se puede tunear solo sobre la entrega."
+        )
+    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(drop=True)
+    LOGGER.info(
+        "El study puntúa el último fold en %s lectores de %s",
+        len(present),
+        config.example_path,
+    )
+    return present, truth
+
+
 def _in_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
     """Deja solo libros del catálogo. El corte temporal no los saca."""
 
@@ -447,7 +473,11 @@ def tune_ease(
     books: pd.DataFrame,
     config: PipelineConfig,
 ) -> EaseParameters:
-    """Elige λ y el mínimo de lecturas maximizando el NDCG@20 del último fold."""
+    """Elige λ y el mínimo de lecturas maximizando el NDCG@20 del último fold.
+
+    Con ``tune_on_example_users`` ese NDCG mira solo los lectores de
+    ``ejemplo.csv``, igual que el resto de los studies.
+    """
 
     try:
         import optuna
@@ -458,8 +488,11 @@ def tune_ease(
     if len(folds) < 2:
         raise ValueError("Se requieren al menos dos folds para el study de EASE")
     train = _in_catalog(folds[-1].train, books)
-    target = folds[-1].target
-    query_users = list(folds[-1].query_users)
+    query_users, target = _study_population(
+        config,
+        folds[-1].query_users,
+        folds[-1].target,
+    )
     half_life = config.retrieval.recency_half_life_days
     cache = _SpectrumCache()
     search = config.ease.search

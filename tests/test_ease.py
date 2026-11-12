@@ -210,6 +210,7 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
         model="ease",
         optuna_trials=3,
         random_seed=0,
+        tune_on_example_users=False,
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=1),
         ease=EaseConfig(
             reg_lambda=10.0,
@@ -239,6 +240,26 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
     seen = set(frame.loc[frame["id_lector"] == "u1", "id_libro"])
     assert ranking["id_libro"].tolist()
     assert set(ranking["id_libro"]).isdisjoint(seen)
+
+
+def test_tune_on_example_users_requires_those_readers(tmp_path) -> None:
+    rows = []
+    for user, start in (("u1", 0), ("u2", 2)):
+        for offset in range(10):
+            rows.append(
+                (user, f"b{start + offset}", f"2020-01-{offset + 1:02d}", 6 + offset % 4)
+            )
+    config = PipelineConfig(
+        artifacts_dir=tmp_path,
+        model="ease",
+        optuna_trials=1,
+        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=1),
+        ease=EaseConfig(reg_lambda=1.0, min_interactions=1),
+    )
+    model = build_model("ease", config)
+
+    with pytest.raises(ValueError, match="ejemplo.csv"):
+        model.fit(_split(_frame(rows)), tune=True)
 
 
 def test_recommend_requires_fit() -> None:
