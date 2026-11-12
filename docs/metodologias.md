@@ -85,11 +85,12 @@ Librería: scikit-learn (`TfidfVectorizer`), SciPy sparse, NumPy, pandas.
 `EaseRetriever` (`src/quelibroleo/two_stage/retrieval.py`), fuente `ease`.
 
 Misma matriz ítem-ítem que el modelo de una etapa (Steck, WWW 2019): en el
-ajuste se diagonaliza `XᵀX` y el score es el de esa solución cerrada. λ,
-`min_interactions` y `weight_mode` no entran al study de `two_stage`. Si
-existe `artifacts/ease_hyperparameters.json`, se usan esos valores; si no,
-los de `EaseConfig`. Esos tres forman parte de la config del tuneo: cambiarlos
-pide un `--tune` nuevo. Optuna solo elige el peso de la lista.
+ajuste se diagonaliza `XᵀX` y el score es el de esa solución cerrada. λ y
+`min_interactions` no entran al study de `two_stage`. Si existe
+`artifacts/ease_hyperparameters.json`, se usan esos valores; si no, los de
+`EaseConfig`. Cambiarlos pide un `--tune` nuevo. Optuna solo elige el peso
+de la lista. La recencia del perfil es `recency_half_life_days`, la misma
+del resto del retrieval.
 
 No rellena con popularidad. Esa lista ya es otra fuente, y mezclarla acá
 haría que los mismos libros sumen dos veces en la fusión. Un lector sin
@@ -218,24 +219,38 @@ no completa con popularidad (ver Retrieval).
 
 Aprende una matriz ítem-ítem **B** que reconstruye la fila del lector,
 `x̂ = x B`, con la diagonal en cero (Steck, WWW 2019). La solución es cerrada:
-se diagonaliza `XᵀX` una vez y cada `λ` solo reescala los autovalores. En
+se diagonaliza `XᵀX` una vez y cada `λ` solo reescala los autovalores.
+
+`X` guarda el rating 1–10. Una lectura ausente vale 0. Esa matriz no lleva
+recencia: dos libros leídos juntos pesan lo mismo aunque haya pasado un año.
+Al puntuar, el perfil sí la lleva. Cada rating se multiplica por
+`2^(-edad / semivida)`, con la edad medida contra la última lectura de ese
+lector y la semivida de `RetrievalConfig.recency_half_life_days` (365). En
 inferencia se enmascaran los libros ya leídos. Si el lector no tiene lecturas
 entre los libros del modelo, el ranking es el de popularidad; si EASE no
 completa 20, popularidad rellena el resto.
 
-Tres hiperparámetros, los únicos que toca su study:
+En el hold-out interno, con los libros de al menos 20 lecturas en el train,
+ese perfil sube el NDCG@20 de 0,141 (el mismo rating en la matriz y en la
+consulta, λ = 17.000) a 0,155. Popularidad, en el mismo corte, queda en 0,072.
+Bajar el mínimo de 20 a 10 casi no mueve el NDCG@20 (0,156) y agranda mucho
+la Gram. Normalizar cada lector para que no dominen los que más leen tampoco
+mejoró el número una vez elegido λ. Un `weight_mode` que metía la recencia o
+una confianza adentro de `X` queda afuera: cambiaba el valor a reconstruir.
+
+Dos hiperparámetros, los únicos que toca su study:
 
 | Parámetro | Valores | Qué cambia |
 | --- | --- | --- |
-| `reg_lambda` | 1–100.000, log. Defecto 500 | Penalización L2 de **B** |
-| `min_interactions` | 10–100, log. Defecto 20 | Libros que entran a la matriz. Por debajo de 10 el catálogo pasa de unos 12.000 y la Gram densa no entra cómoda |
-| `weight_mode` | `binary`, `rating`, `confidence` | Unos, el rating 1–10, o `(1 + rating / 10)` por la misma recencia que ALS |
+| `reg_lambda` | 100–100.000, log. Defecto 15.000 | Penalización L2 de **B**. El defecto está en la escala de una Gram de ratings |
+| `min_interactions` | 10–100, log. Defecto 20 | Libros que entran a la matriz. Con 5 lecturas el catálogo pasa de unos 12.000 y la Gram densa no entra cómoda. Con el mínimo en 15, cerca del 30% de las lecturas del hold-out ni siquiera son columnas |
 
-`confidence` usa `recency_half_life_days` de la config de retrieval (365). Ese
-valor no se busca. `--label-gain` sigue siendo solo de LambdaRank.
+La semivida no se busca. `--label-gain` sigue siendo solo de LambdaRank.
+Un JSON viejo que todavía traiga `weight_mode` se lee igual: esa clave se
+ignora.
 
 El study maximiza el NDCG@20 del último fold rolling y escribe
 `artifacts/ease_hyperparameters.json`. No lee ni reemplaza
 `tuned_hyperparameters.json`. Sin `--tune`, la corrida siguiente reutiliza ese
 archivo. En MLflow el tag `model` vale `ease`, el nombre de la corrida lo
-incluye, y `ease_selected.*` guarda el trío elegido.
+incluye, y `ease_selected.*` guarda λ y el mínimo.

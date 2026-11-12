@@ -4,6 +4,11 @@ Con la matriz de interacciones X (lectores × libros) se aprende B tal que
 la predicción es X B, la diagonal de B es cero y el ajuste es error
 cuadrático más una penalización L2.
 
+X guarda el rating. Una lectura que no está vale 0. Al puntuar, el perfil
+del lector es ese rating por la recencia: la similitud entre libros no
+depende de cuándo se leyeron, y el ranking sí. Meter la recencia en X
+cambiaría el número a reconstruir, no el peso del error.
+
 `EaseModel` es el recomendador de una etapa. `EaseRetriever`, en
 `two_stage/retrieval.py`, usa la misma matriz como fuente de `two_stage`
 y no rellena con popularidad: esa lista ya es otra fuente.
@@ -22,7 +27,7 @@ import pandas as pd
 from scipy import sparse
 
 from .baselines import PopularityRecommender
-from .config import EASE_WEIGHT_MODES, EaseConfig, PipelineConfig
+from .config import EaseConfig, PipelineConfig
 from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, observed_catalog
 from .metrics import ndcg_at_k
 from .split_data import SplitData, validation_folds
@@ -30,19 +35,18 @@ from .split_data import SplitData, validation_folds
 LOGGER = logging.getLogger(__name__)
 EASE_HYPERPARAMETERS_FILE = "ease_hyperparameters.json"
 TOP_K = 20
-# Por debajo de 10 lecturas el catálogo pasa de ~12.000 libros y la Gram
-# densa deja de entrar cómoda en memoria. La búsqueda no baja de 10.
+# Con 5 lecturas el catálogo pasa de ~12.000 libros y la Gram densa deja de
+# entrar cómoda en memoria. La búsqueda no baja de 10.
 MAX_ITEMS = 12_000
 _SCORE_BATCH = 512
 
 
 @dataclass(frozen=True)
 class EaseParameters:
-    """Los tres hiperparámetros con los que se ajusta la matriz."""
+    """λ y el mínimo de lecturas. El perfil de consulta no se busca."""
 
     reg_lambda: float
     min_interactions: int
-    weight_mode: str
     run_name: str = ""
 
 
@@ -76,20 +80,22 @@ def load_ease_hyperparameters(path: Path) -> EaseParameters:
             raise TypeError("el archivo no es un objeto")
         reg_lambda = float(payload["reg_lambda"])
         min_interactions = int(payload["min_interactions"])
-        weight_mode = payload["weight_mode"]
         run_name = payload.get("run_name", "")
-        if not isinstance(weight_mode, str) or weight_mode not in EASE_WEIGHT_MODES:
-            raise ValueError("weight_mode desconocido")
         if not isinstance(run_name, str):
             raise TypeError("run_name debe ser texto")
         if reg_lambda <= 0 or min_interactions < 1:
             raise ValueError("reg_lambda y min_interactions deben ser positivos")
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError(f"Hiperparámetros de EASE inválidos en {path}") from exc
+    if "weight_mode" in payload:
+        LOGGER.info(
+            "Se ignora weight_mode=%s en %s: la matriz usa el rating y la consulta, la recencia",
+            payload["weight_mode"],
+            path,
+        )
     return EaseParameters(
         reg_lambda=reg_lambda,
         min_interactions=min_interactions,
-        weight_mode=weight_mode,
         run_name=run_name,
     )
 
@@ -100,7 +106,6 @@ def parameters_from_config(config: EaseConfig) -> EaseParameters:
     return EaseParameters(
         reg_lambda=float(config.reg_lambda),
         min_interactions=int(config.min_interactions),
-        weight_mode=config.weight_mode,
     )
 
 
@@ -108,7 +113,7 @@ def ease_source_parameters(config: PipelineConfig) -> EaseParameters:
     """Parámetros de la matriz, como modelo único o como fuente de two_stage.
 
     El JSON de un `--model ease --tune` gana. Si no está, valen los de
-    `EaseConfig`. two_stage no vuelve a buscar estos tres: solo elige el peso.
+    `EaseConfig`. two_stage no vuelve a buscar λ ni el mínimo: solo elige el peso.
     """
 
     path = ease_hyperparameters_path(config.artifacts_dir)
@@ -124,51 +129,35 @@ def resolve_ease_parameters(config: PipelineConfig) -> tuple[EaseParameters, str
     parameters = ease_source_parameters(config)
     if path.is_file():
         LOGGER.info(
-            "Reusando EASE de %s (corrida %s, λ=%s, mínimo=%s, peso=%s)",
+            "Reusando EASE de %s (corrida %s, λ=%s, mínimo=%s)",
             path,
             parameters.run_name or "sin nombre",
             parameters.reg_lambda,
             parameters.min_interactions,
-            parameters.weight_mode,
         )
         return parameters, "saved"
     LOGGER.info("Sin %s; EASE usa los hiperparámetros fijos", path)
     return parameters, "default"
 
 
-def _row_weights(
-    frame: pd.DataFrame,
-    weight_mode: str,
-    half_life_days: float,
-) -> np.ndarray:
-    """Peso de cada lectura. La recencia usa el último evento del lector."""
+def _profile_weights(frame: pd.DataFrame, half_life_days: float) -> np.ndarray:
+    """Rating por recencia. La edad se mide contra la última lectura del lector."""
 
-    if weight_mode == "binary":
-        return np.ones(len(frame), dtype=np.float64)
     rating = frame[RATING_COL].to_numpy(dtype=np.float64)
-    if weight_mode == "rating":
+    if half_life_days <= 0 or len(frame) == 0:
         return rating
-    if half_life_days <= 0:
-        recency = np.ones(len(frame), dtype=np.float64)
-    else:
-        max_dates = frame.groupby(USER_COL, sort=False)[DATE_COL].transform("max")
-        age_days = (max_dates - frame[DATE_COL]).dt.days.clip(lower=0).to_numpy()
-        recency = np.exp2(-age_days / half_life_days)
-    return (1.0 + rating / 10.0) * recency
+    max_dates = frame.groupby(USER_COL, sort=False)[DATE_COL].transform("max")
+    age_days = (max_dates - frame[DATE_COL]).dt.days.clip(lower=0).to_numpy()
+    return rating * np.exp2(-age_days / half_life_days)
 
 
 def interaction_matrix(
     frame: pd.DataFrame,
     *,
     min_interactions: int,
-    weight_mode: str,
-    half_life_days: float,
 ) -> tuple[sparse.csr_matrix, np.ndarray]:
-    """Matriz lectores × libros frecuentes. Los pesos salen del historial completo."""
+    """Matriz lectores × libros frecuentes. Cada celda es el rating, sin recencia."""
 
-    if weight_mode not in EASE_WEIGHT_MODES:
-        known = ", ".join(EASE_WEIGHT_MODES)
-        raise ValueError(f"weight_mode debe ser uno de: {known}")
     counts = frame.groupby(ITEM_COL, sort=False).size()
     item_ids = np.array(
         sorted(counts[counts >= min_interactions].index.astype(str)),
@@ -195,7 +184,7 @@ def interaction_matrix(
     )
     user_index = {user: index for index, user in enumerate(users)}
     rows = frame.loc[mask, USER_COL].astype(str).map(user_index).to_numpy()
-    weights = _row_weights(frame, weight_mode, half_life_days)[mask]
+    weights = frame.loc[mask, RATING_COL].to_numpy(dtype=np.float64)
     matrix = sparse.csr_matrix(
         (weights, (rows, columns[mask])),
         shape=(len(users), len(item_ids)),
@@ -247,10 +236,9 @@ def _matrix_for_users(
     users: list[str],
     item_ids: np.ndarray,
     *,
-    weight_mode: str,
     half_life_days: float,
 ) -> sparse.csr_matrix:
-    """Una fila por lector, en ese orden, restringida a los libros del modelo."""
+    """Una fila por lector, en ese orden. El peso es rating por recencia."""
 
     item_index = {item: index for index, item in enumerate(item_ids)}
     if not item_index:
@@ -259,7 +247,7 @@ def _matrix_for_users(
     columns = frame[ITEM_COL].astype(str).map(item_index)
     rows = frame[USER_COL].astype(str).map(user_index)
     mask = columns.notna() & rows.notna()
-    weights = _row_weights(frame, weight_mode, half_life_days)
+    weights = _profile_weights(frame, half_life_days)
     return sparse.csr_matrix(
         (
             weights[mask.to_numpy()],
@@ -307,22 +295,17 @@ class _SpectrumCache:
         frame: pd.DataFrame,
         *,
         min_interactions: int,
-        weight_mode: str,
-        half_life_days: float,
     ) -> EaseSpectrum:
-        key = (id(frame), min_interactions, weight_mode, half_life_days)
+        key = (id(frame), min_interactions)
         if key == self._key and self.spectrum is not None:
             return self.spectrum
         matrix, item_ids = interaction_matrix(
             frame,
             min_interactions=min_interactions,
-            weight_mode=weight_mode,
-            half_life_days=half_life_days,
         )
         LOGGER.info(
-            "EASE factoriza %s libros (%s, mínimo %s)",
+            "EASE factoriza %s libros (mínimo %s)",
             len(item_ids),
-            weight_mode,
             min_interactions,
         )
         spectrum = spectrum_from_matrix(matrix, item_ids)
@@ -350,7 +333,6 @@ def ease_ranking(
         history,
         unique,
         spectrum.item_ids,
-        weight_mode=parameters.weight_mode,
         half_life_days=half_life_days,
     )
     scored = np.zeros((len(unique), len(spectrum.item_ids)), dtype=np.float64)
@@ -465,7 +447,7 @@ def tune_ease(
     books: pd.DataFrame,
     config: PipelineConfig,
 ) -> EaseParameters:
-    """Elige λ, el mínimo de lecturas y el peso maximizando el NDCG@20 del último fold."""
+    """Elige λ y el mínimo de lecturas maximizando el NDCG@20 del último fold."""
 
     try:
         import optuna
@@ -487,14 +469,8 @@ def tune_ease(
 
         reg_lambda = float(search.reg_lambda.suggest(trial, "reg_lambda"))
         min_interactions = int(search.min_interactions.suggest(trial, "min_interactions"))
-        weight_mode = str(trial.suggest_categorical("weight_mode", list(EASE_WEIGHT_MODES)))
-        spectrum = cache.get(
-            train,
-            min_interactions=min_interactions,
-            weight_mode=weight_mode,
-            half_life_days=half_life,
-        )
-        parameters = EaseParameters(reg_lambda, min_interactions, weight_mode)
+        spectrum = cache.get(train, min_interactions=min_interactions)
+        parameters = EaseParameters(reg_lambda, min_interactions)
         popularity = PopularityRecommender().fit(
             train,
             set(train[ITEM_COL].astype(str)),
@@ -510,11 +486,10 @@ def tune_ease(
         )
         score = ndcg_at_k(recommendations, target, k=TOP_K)
         LOGGER.info(
-            "EASE trial %s: λ=%.4g mínimo=%s peso=%s ndcg=%.4f",
+            "EASE trial %s: λ=%.4g mínimo=%s ndcg=%.4f",
             trial.number,
             reg_lambda,
             min_interactions,
-            weight_mode,
             score,
         )
         return score
@@ -547,7 +522,6 @@ def tune_ease(
     return EaseParameters(
         reg_lambda=float(best.params["reg_lambda"]),
         min_interactions=int(best.params["min_interactions"]),
-        weight_mode=str(best.params["weight_mode"]),
         run_name=active_run_name(),
     )
 
@@ -565,7 +539,6 @@ def _write_ease_hyperparameters(config: PipelineConfig, parameters: EaseParamete
                 {
                     "reg_lambda": parameters.reg_lambda,
                     "min_interactions": parameters.min_interactions,
-                    "weight_mode": parameters.weight_mode,
                 }
             ),
             ensure_ascii=False,
@@ -588,7 +561,6 @@ def _log_selected(parameters: EaseParameters, n_items: int, origin: str) -> None
         {
             "ease_selected.reg_lambda": parameters.reg_lambda,
             "ease_selected.min_interactions": parameters.min_interactions,
-            "ease_selected.weight_mode": parameters.weight_mode,
             "ease_selected.origin": origin,
             "ease_selected.n_items": n_items,
         }
@@ -627,19 +599,15 @@ class EaseModel:
             self.hyperparameters_origin = origin
             self.hyperparameters_run_name = parameters.run_name if origin == "saved" else ""
         history = _in_catalog(raw, split.books)
-        half_life = self.config.retrieval.recency_half_life_days
         matrix, item_ids = interaction_matrix(
             history,
             min_interactions=parameters.min_interactions,
-            weight_mode=parameters.weight_mode,
-            half_life_days=half_life,
         )
         LOGGER.info(
-            "EASE entrena %s libros (λ=%s, mínimo=%s, peso=%s)",
+            "EASE entrena %s libros (λ=%s, mínimo=%s)",
             len(item_ids),
             parameters.reg_lambda,
             parameters.min_interactions,
-            parameters.weight_mode,
         )
         books = split.books.copy()
         books[ITEM_COL] = books[ITEM_COL].astype(str)
@@ -652,7 +620,6 @@ class EaseModel:
             "model": self.name,
             "reg_lambda": parameters.reg_lambda,
             "min_interactions": parameters.min_interactions,
-            "weight_mode": parameters.weight_mode,
             "n_items": len(item_ids),
         }
         _log_selected(parameters, len(item_ids), self.hyperparameters_origin)

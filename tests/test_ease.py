@@ -94,7 +94,7 @@ def test_neighbor_outranks_a_rare_cooccurrence_and_skips_seen_books(tmp_path) ->
     frame = _frame(rows)
     config = PipelineConfig(
         artifacts_dir=tmp_path,
-        ease=EaseConfig(reg_lambda=1.0, min_interactions=1, weight_mode="binary"),
+        ease=EaseConfig(reg_lambda=1.0, min_interactions=1),
     )
     model = build_model("ease", config)
     model.fit(_split(frame), tune=False)
@@ -118,7 +118,7 @@ def test_reader_without_history_follows_popularity(tmp_path) -> None:
     )
     config = PipelineConfig(
         artifacts_dir=tmp_path,
-        ease=EaseConfig(reg_lambda=10.0, min_interactions=1, weight_mode="binary"),
+        ease=EaseConfig(reg_lambda=10.0, min_interactions=1),
     )
     model = build_model("ease", config)
     model.fit(_split(frame), tune=False)
@@ -137,37 +137,41 @@ def test_min_interactions_drops_rare_books() -> None:
         ]
     )
 
-    _, items = interaction_matrix(
-        frame,
-        min_interactions=2,
-        weight_mode="binary",
-        half_life_days=365,
-    )
+    _, items = interaction_matrix(frame, min_interactions=2)
 
     assert items.tolist() == ["frequent"]
 
 
-def test_weight_modes_are_distinct() -> None:
-    frame = _frame(
-        [
-            ("u1", "a", "2020-01-01", 10),
-            ("u1", "b", "2024-01-01", 2),
-        ]
+def test_recent_read_outranks_an_equally_rated_old_one(tmp_path) -> None:
+    rows = []
+    for user, day in (("u2", 1), ("u3", 2), ("u4", 3)):
+        rows.append((user, "old", f"2010-01-0{day}", 8))
+        rows.append((user, "from_old", f"2010-02-0{day}", 8))
+        rows.append((user, "recent", f"2024-01-0{day}", 8))
+        rows.append((user, "from_recent", f"2024-02-0{day}", 8))
+    rows.append(("u1", "old", "2010-06-01", 8))
+    rows.append(("u1", "recent", "2024-06-01", 8))
+    frame = _frame(rows)
+    config = PipelineConfig(
+        artifacts_dir=tmp_path,
+        ease=EaseConfig(reg_lambda=1.0, min_interactions=1),
     )
-    binary, _ = interaction_matrix(
-        frame, min_interactions=1, weight_mode="binary", half_life_days=365
-    )
-    rating, _ = interaction_matrix(
-        frame, min_interactions=1, weight_mode="rating", half_life_days=365
-    )
-    confidence, _ = interaction_matrix(
-        frame, min_interactions=1, weight_mode="confidence", half_life_days=365
-    )
+    model = build_model("ease", config)
+    model.fit(_split(frame))
+    ranking = model.recommend(["u1"])
 
-    assert binary.sum() == pytest.approx(2)
-    assert rating.sum() == pytest.approx(12)
-    assert confidence.sum() != pytest.approx(rating.sum())
-    assert confidence.max() > confidence.min()
+    assert ranking["id_libro"].tolist()[0] == "from_recent"
+
+
+def test_gram_uses_the_rating_and_not_the_date() -> None:
+    early = _frame([("u1", "a", "2010-01-01", 10), ("u1", "b", "2010-01-02", 2)])
+    late = _frame([("u1", "a", "2024-01-01", 10), ("u1", "b", "2024-06-01", 2)])
+
+    early_matrix, _ = interaction_matrix(early, min_interactions=1)
+    late_matrix, _ = interaction_matrix(late, min_interactions=1)
+
+    assert early_matrix.toarray() == pytest.approx(late_matrix.toarray())
+    assert early_matrix.sum() == pytest.approx(12)
 
 
 def test_dense_item_cap_rejects_an_oversized_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,12 +184,7 @@ def test_dense_item_cap_rejects_an_oversized_catalog(monkeypatch: pytest.MonkeyP
     )
 
     with pytest.raises(ValueError, match="densa"):
-        interaction_matrix(
-            frame,
-            min_interactions=1,
-            weight_mode="binary",
-            half_life_days=365,
-        )
+        interaction_matrix(frame, min_interactions=1)
 
 
 def test_invalid_ease_file_is_rejected(tmp_path) -> None:
@@ -226,9 +225,9 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
 
     saved = json.loads((tmp_path / "ease_hyperparameters.json").read_text(encoding="utf-8"))
     assert two_stage.read_text(encoding="utf-8") == "{}\n"
-    assert saved["weight_mode"] in {"binary", "rating", "confidence"}
     assert saved["min_interactions"] in {1, 2}
     assert saved["reg_lambda"] > 0
+    assert "weight_mode" not in saved
     assert model.hyperparameters_origin == "tune"
     assert model.hyperparameters["model"] == "ease"
 
@@ -236,7 +235,6 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
     reused.fit(_split(frame), tune=False)
     assert reused.hyperparameters_origin == "saved"
     assert reused.hyperparameters["reg_lambda"] == saved["reg_lambda"]
-    assert reused.hyperparameters["weight_mode"] == saved["weight_mode"]
     ranking = reused.recommend(["u1"])
     seen = set(frame.loc[frame["id_lector"] == "u1", "id_libro"])
     assert ranking["id_libro"].tolist()

@@ -81,7 +81,8 @@ EaseSourceOption = Annotated[
             "Prende o apaga EASE como fuente de retrieval. "
             "Sin el flag se usa RetrievalConfig.ease_source. "
             "Prenderlo por primera vez exige --tune. "
-            "λ, el mínimo de lecturas y el peso salen del JSON de EASE o de EaseConfig"
+            "λ y el mínimo de lecturas salen del JSON de EASE o de EaseConfig. "
+            "La consulta pondera el rating por recencia"
         ),
     ),
 ]

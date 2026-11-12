@@ -128,7 +128,7 @@ def test_source_flags_choose_which_retrievers_are_built() -> None:
 def test_ease_retriever_ranks_neighbors_and_does_not_pad_with_popularity() -> None:
     interactions, catalog = tiny_data()
     source = EaseRetriever(
-        EaseParameters(reg_lambda=1.0, min_interactions=1, weight_mode="binary"),
+        EaseParameters(reg_lambda=1.0, min_interactions=1),
         half_life_days=365.0,
     ).fit(interactions, catalog)
 
@@ -163,7 +163,6 @@ def test_ease_source_reuses_saved_parameters(tmp_path) -> None:
     assert isinstance(ease, EaseRetriever)
     assert ease.parameters.reg_lambda == 12.0
     assert ease.parameters.min_interactions == 30
-    assert ease.parameters.weight_mode == "rating"
 
 
 def test_retrieval_config_requires_one_enabled_source() -> None:

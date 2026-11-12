@@ -548,9 +548,10 @@ class TwoTowerRetriever:
 class EaseRetriever:
     """EASE como fuente. La matriz se ajusta en este proceso.
 
-    λ, el mínimo de lecturas y el peso de la matriz no los elige el study de
-    two_stage: salen del JSON de EASE o de `EaseConfig`. No rellena con
-    popularidad. Un lector sin peso en los libros del modelo no aporta filas.
+    λ y el mínimo de lecturas no los elige el study de two_stage: salen del
+    JSON de EASE o de `EaseConfig`. La matriz es el rating; al puntuar se
+    multiplica por la recencia. No rellena con popularidad. Un lector sin
+    peso en los libros del modelo no aporta filas.
     """
 
     source_name = "ease"
@@ -570,15 +571,12 @@ class EaseRetriever:
         matrix, item_ids = interaction_matrix(
             fit_data,
             min_interactions=self.parameters.min_interactions,
-            weight_mode=self.parameters.weight_mode,
-            half_life_days=self.half_life_days,
         )
         LOGGER.info(
-            "EASE como fuente: %s libros (λ=%s, mínimo=%s, peso=%s)",
+            "EASE como fuente: %s libros (λ=%s, mínimo=%s)",
             len(item_ids),
             self.parameters.reg_lambda,
             self.parameters.min_interactions,
-            self.parameters.weight_mode,
         )
         self._spectrum = spectrum_from_matrix(matrix, item_ids)
         return self

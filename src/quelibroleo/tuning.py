@@ -70,8 +70,9 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
 
     No entran la nota, la carpeta de artefactos ni la ruta de la entrega: no
     cambian el study. `example_path` entra solo si el objetivo usa esos lectores.
-    El two-tower entra solo si es una fuente. EASE entra con los tres valores
-    con los que se arma la matriz, los del JSON o los de `EaseConfig`.
+    El two-tower entra solo si es una fuente. EASE entra con λ y el mínimo de
+    lecturas, los del JSON o los de `EaseConfig`. La recencia del perfil ya
+    está en `recency_half_life_days`.
     """
 
     retrieval = config.retrieval
@@ -108,7 +109,6 @@ def two_stage_tuning_fingerprint(config: PipelineConfig) -> dict[str, Any]:
         fingerprint["ease"] = {
             "reg_lambda": parameters.reg_lambda,
             "min_interactions": parameters.min_interactions,
-            "weight_mode": parameters.weight_mode,
         }
     return fingerprint
 

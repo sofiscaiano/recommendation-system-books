@@ -138,19 +138,19 @@ class RankerSearch:
 
 
 LABEL_GAIN_MODES = ("linear", "exponential")
-EASE_WEIGHT_MODES = ("binary", "rating", "confidence")
 
 
 @dataclass(frozen=True)
 class EaseSearch:
     """Hiperparámetros que recorre el study de `--model ease`.
 
-    `two_stage` no los busca. La fuente usa el JSON de EASE o los valores fijos,
-    y Optuna solo elige el peso de esa lista en la fusión.
+    `two_stage` no los busca. La fuente usa el JSON de EASE o estos valores,
+    y Optuna solo elige el peso de esa lista en la fusión. La recencia del
+    perfil no entra: sale de `RetrievalConfig.recency_half_life_days`.
     """
 
     reg_lambda: SearchRange = field(
-        default_factory=lambda: SearchRange(1.0, 100_000.0, log=True)
+        default_factory=lambda: SearchRange(100.0, 100_000.0, log=True)
     )
     min_interactions: SearchRange = field(
         default_factory=lambda: SearchRange(10, 100, log=True, integer=True)
@@ -159,24 +159,19 @@ class EaseSearch:
 
 @dataclass(frozen=True)
 class EaseConfig:
-    """Valores fijos de EASE. El peso de la matriz no entra al intervalo numérico.
+    """λ y el mínimo de lecturas de EASE, si no hay un JSON guardado.
 
-    `binary` pone unos, `rating` el valor 1–10 y `confidence` la misma
-    confianza de ALS: `(1 + rating / 10)` por recencia. El modelo `ease` los
-    usa si no hay JSON. Con `retrieval.ease_source`, two_stage arma la misma
-    matriz: el JSON de un tuneo de EASE gana y, si no está, valen estos tres.
-    La búsqueda de EASE escribe otro archivo que el de LambdaRank.
+    La matriz siempre lleva el rating. Al puntuar, ese rating se multiplica
+    por la recencia (`RetrievalConfig.recency_half_life_days`). El study no
+    elige esa semivida. Con `retrieval.ease_source`, two_stage arma la misma
+    matriz: el JSON de un tuneo de EASE gana y no lo pisa.
     """
 
-    reg_lambda: float = 500.0
+    reg_lambda: float = 15_000.0
     min_interactions: int = 20
-    weight_mode: str = "binary"
     search: EaseSearch = field(default_factory=EaseSearch)
 
     def __post_init__(self) -> None:
-        if self.weight_mode not in EASE_WEIGHT_MODES:
-            known = ", ".join(EASE_WEIGHT_MODES)
-            raise ValueError(f"weight_mode debe ser uno de: {known}")
         if self.reg_lambda <= 0:
             raise ValueError("reg_lambda debe ser positivo")
         if self.min_interactions < 1:
