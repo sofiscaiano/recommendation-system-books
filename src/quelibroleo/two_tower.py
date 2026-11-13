@@ -369,25 +369,88 @@ def fit_history(
     return trained, epochs, val_ndcg
 
 
-def top_candidates(
+@dataclass
+class TwoTowerWeights:
+    """Red ya entrenada, sin tensores: el proceso padre no importa torch."""
+
+    state: dict[str, np.ndarray]
+    item_ids: np.ndarray
+    item_author: np.ndarray
+    item_genre: np.ndarray
+    n_authors: int
+    n_genres: int
+    log_q: np.ndarray
+    position: dict[str, int]
+    starts: np.ndarray
+    lengths: np.ndarray
+    items: np.ndarray
+    ratings: np.ndarray
+    block: TwoTowerConfig
+
+
+def train_weights(
     history: pd.DataFrame,
     books: pd.DataFrame,
     config: PipelineConfig,
+) -> TwoTowerWeights:
+    """Entrena una vez y devuelve los pesos. No se llama desde ``recommend``."""
+
+    trained, _, _ = fit_history(history, books, config)
+    vocabulary = trained.vocabulary
+    sequences = trained.sequences
+    return TwoTowerWeights(
+        state={
+            name: value.detach().cpu().numpy()
+            for name, value in trained.net.state_dict().items()
+        },
+        item_ids=vocabulary.item_ids,
+        item_author=vocabulary.item_author,
+        item_genre=vocabulary.item_genre,
+        n_authors=vocabulary.n_authors,
+        n_genres=vocabulary.n_genres,
+        log_q=vocabulary.log_q,
+        position=sequences.position,
+        starts=sequences.starts,
+        lengths=sequences.lengths,
+        items=sequences.items,
+        ratings=sequences.ratings,
+        block=config.two_tower,
+    )
+
+
+def score_weights(
+    weights: TwoTowerWeights,
     users: list[str],
     n: int,
 ) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
-    """Lectores con historia, índices y scores de su top-n, e ids del vocabulario.
+    """Top-n de una red ya entrenada. No ajusta pesos ni elige épocas."""
 
-    Arrays en vez de un DataFrame: viajan baratos desde el proceso hijo.
-    """
-
-    trained, _, _ = fit_history(history, books, config)
-    known = [str(user) for user in users if str(user) in trained.sequences.position]
+    vocabulary = Vocabulary(
+        item_ids=weights.item_ids,
+        item_index={item: index for index, item in enumerate(weights.item_ids)},
+        item_author=weights.item_author,
+        item_genre=weights.item_genre,
+        n_authors=weights.n_authors,
+        n_genres=weights.n_genres,
+        log_q=weights.log_q,
+    )
+    sequences = Sequences(
+        position=weights.position,
+        starts=weights.starts,
+        lengths=weights.lengths,
+        items=weights.items,
+        ratings=weights.ratings,
+    )
+    net = TwoTowerNet(vocabulary, weights.block)
+    net.load_state_dict(
+        {name: torch.as_tensor(value) for name, value in weights.state.items()}
+    )
+    known = [str(user) for user in users if str(user) in sequences.position]
     if not known:
         empty = np.empty((0, 0))
-        return [], empty.astype(np.int64), empty.astype(np.float32), trained.vocabulary.item_ids
-    indices, scores = _top_items(trained.net, trained.sequences, known, k=n)
-    return known, indices, scores, trained.vocabulary.item_ids
+        return [], empty.astype(np.int64), empty.astype(np.float32), vocabulary.item_ids
+    indices, scores = _top_items(net, sequences, known, k=n)
+    return known, indices, scores, vocabulary.item_ids
 
 
 def tune_two_tower(

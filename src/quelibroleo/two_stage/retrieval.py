@@ -490,32 +490,49 @@ class TfidfRetriever:
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
 
 
-def _two_tower_candidates(*args: object) -> tuple:
-    """Corre en el proceso hijo: ahí sí se importa torch."""
+def _train_two_tower(history: pd.DataFrame, books: pd.DataFrame, config: PipelineConfig):
+    """Corre en el proceso hijo: ahí sí se importa torch, y se entrena una vez."""
 
-    from ..two_tower import top_candidates
+    from ..two_tower import train_weights
 
-    return top_candidates(*args)
+    return train_weights(history, books, config)
+
+
+def _score_two_tower(weights: object, users: list[str], n: int) -> tuple:
+    """Corre en el proceso hijo y solo puntúa la red que devolvió ``fit``."""
+
+    from ..two_tower import score_weights
+
+    return score_weights(weights, users, n)
 
 
 class TwoTowerRetriever:
-    """El two-tower como fuente. Entrena y puntúa en un proceso hijo.
+    """El two-tower como fuente. Entrena en ``fit`` y puntúa en ``recommend``.
 
     torch y LightGBM cargan copias distintas de libomp y juntas se caen en
-    macOS (LightGBM #6595). Este proceso nunca importa torch. El
-    entrenamiento ocurre en ``recommend``, con la historia guardada en ``fit``.
+    macOS (LightGBM #6595). Este proceso nunca importa torch: tanto el
+    entrenamiento como el top-n corren en un proceso hijo. ``recommend`` no
+    vuelve a elegir épocas ni a reentrenar; usa los pesos de ``fit``.
     """
 
     source_name = "two_tower"
 
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
-        self._interactions: pd.DataFrame | None = None
-        self._catalog: pd.DataFrame | None = None
+        self._weights: object | None = None
 
     def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> TwoTowerRetriever:
-        self._interactions = interactions
-        self._catalog = catalog
+        from concurrent.futures import ProcessPoolExecutor
+        from multiprocessing import get_context
+
+        with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
+            self._weights = pool.submit(
+                _train_two_tower, interactions, catalog, self.config
+            ).result()
+        LOGGER.info(
+            "two_tower entrenado: %s libros en el vocabulario",
+            len(self._weights.item_ids),
+        )
         return self
 
     def recommend(
@@ -524,18 +541,17 @@ class TwoTowerRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        if self._interactions is None or self._catalog is None:
+        del history
+        if self._weights is None:
             raise RuntimeError("El recomendador debe entrenarse antes de recomendar")
         from concurrent.futures import ProcessPoolExecutor
         from multiprocessing import get_context
 
         with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
             known, indices, scores, item_ids = pool.submit(
-                _two_tower_candidates,
-                self._interactions,
-                self._catalog,
-                self.config,
-                list(users),
+                _score_two_tower,
+                self._weights,
+                [str(user) for user in users],
                 n,
             ).result()
         if not known:

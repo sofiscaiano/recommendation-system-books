@@ -18,6 +18,8 @@ from quelibroleo.two_tower import (
     history_bags,
     in_batch_loss,
     sample_examples,
+    score_weights,
+    train_weights,
 )
 
 
@@ -85,6 +87,7 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     source = TwoTowerRetriever(config).fit(history, _books(history))
 
     candidates = source.recommend(["u0", "nuevo"], history, n=5)
+    again = source.recommend(["u0", "nuevo"], history, n=5)
 
     seen = set(history.loc[history["id_lector"] == "u0", "id_libro"])
     assert list(candidates.columns) == ["id_lector", "id_libro", "source", "score", "rank"]
@@ -92,6 +95,25 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     assert candidates["rank"].tolist() == [1, 2, 3]
     assert set(candidates["id_libro"]).isdisjoint(seen)
     assert (candidates["source"] == "two_tower").all()
+    assert again.reset_index(drop=True).equals(candidates.reset_index(drop=True))
+
+
+def test_scoring_does_not_train_again(monkeypatch) -> None:
+    history = _history()
+    config = PipelineConfig(
+        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
+        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+    )
+    weights = train_weights(history, _books(history), config)
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("puntuar no vuelve a entrenar")
+
+    monkeypatch.setattr("quelibroleo.two_tower.fit_history", fail_if_called)
+    known, indices, _scores, _item_ids = score_weights(weights, ["u0", "nuevo"], 5)
+
+    assert known == ["u0"]
+    assert indices.shape == (1, 5)
 
 
 def test_fit_recommends_unseen_books_and_falls_back_to_popularity(tmp_path) -> None:
