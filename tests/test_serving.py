@@ -12,6 +12,7 @@ from quelibroleo.data import ITEM_COL, USER_COL, observed_catalog
 from quelibroleo.serving import (
     ServingModel,
     _isbn,
+    _recommend_source,
     _year,
     build_request_history,
     export_serving_artifact,
@@ -213,6 +214,20 @@ def test_serving_model_roundtrip(
     assert recommend_user(restored, "u1", history) == recommend_user(
         model, "u1", history
     )
+
+
+def test_bpr_request_excludes_the_session_book(
+    fitted: tuple[ServingModel, pd.DataFrame, list[str]],
+) -> None:
+    model, interactions, _books = fitted
+    bpr = next(retriever for retriever in model.retrievers if getattr(retriever, "algorithm", None) == "bpr")
+    stored = interactions.loc[interactions[USER_COL] == "u1"]
+    history = build_request_history(stored, "u1", [("b10", 10)])
+
+    frame = _recommend_source(bpr, "u1", history, 10)
+
+    assert "b10" not in set(frame[ITEM_COL].astype(str))
+    assert "b00" not in set(frame[ITEM_COL].astype(str))
 
 
 def test_book_card_formats_year_and_isbn() -> None:

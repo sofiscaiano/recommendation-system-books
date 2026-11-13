@@ -8,6 +8,7 @@ después de un ``submit``, y cada request solo llama a ``recommend`` y
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -108,11 +109,15 @@ def export_serving_artifact(
 
 
 def load_serving_model(path: str | Path) -> ServingModel:
-    """Lee el artefacto exportado."""
+    """Lee el artefacto exportado y deja listo el two-tower, si está."""
 
     model = joblib.load(path)
     if not isinstance(model, ServingModel):
         raise TypeError(f"{path} no contiene un ServingModel")
+    for retriever in model.retrievers:
+        warm = getattr(retriever, "warm", None)
+        if warm is not None:
+            warm()
     return model
 
 
@@ -334,10 +339,7 @@ def recommend_user(
         rrf_k=model.rrf_k,
         n_sources=len(model.retrievers),
     )
-    frames = [
-        _recommend_source(retriever, user_id, profile, per_source)
-        for retriever in model.retrievers
-    ]
+    frames = _source_frames(model.retrievers, user_id, profile, per_source)
     frames = [frame for frame in frames if not frame.empty]
     if frames:
         candidates = pd.concat(frames, ignore_index=True)
@@ -401,16 +403,41 @@ def _profile(history: pd.DataFrame, user_id: str) -> pd.DataFrame:
     return profile.reset_index(drop=True)
 
 
+def _source_frames(
+    retrievers: list[Any],
+    user_id: str,
+    history: pd.DataFrame,
+    n: int,
+) -> list[pd.DataFrame]:
+    """Pide cada fuente. Con varias, corren a la vez: no comparten estado."""
+
+    if len(retrievers) <= 1:
+        return [_recommend_source(retriever, user_id, history, n) for retriever in retrievers]
+    with ThreadPoolExecutor(max_workers=len(retrievers)) as pool:
+        return list(
+            pool.map(
+                lambda retriever: _recommend_source(retriever, user_id, history, n),
+                retrievers,
+            )
+        )
+
+
 def _recommend_source(
     retriever: Any,
     user_id: str,
     history: pd.DataFrame,
     n: int,
 ) -> pd.DataFrame:
-    """Candidatos de una fuente. ALS recalcula el factor de este lector."""
+    """Candidatos de una fuente con el historial de este pedido.
+
+    ALS recalcula el factor. BPR lo corre hacia las lecturas nuevas. El
+    resto arma el perfil con ese historial.
+    """
 
     if isinstance(retriever, ImplicitMFRetriever) and retriever.algorithm == "als":
         return retriever.recommend_fold_in(user_id, history, n)
+    if isinstance(retriever, ImplicitMFRetriever) and retriever.algorithm == "bpr":
+        return retriever.recommend_with_history(user_id, history, n)
     return retriever.recommend([user_id], history, n)
 
 

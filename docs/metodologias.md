@@ -286,4 +286,5 @@ y `user_authors` quedan en `TwoTowerConfig`. El archivo es
 `two_tower_hyperparameters.json`. Conviene bajar `optuna_trials` para esa
 corrida: cada trial entrena la red. `two_stage` le pasa al proceso hijo la
 config ya resuelta y el hijo no abre el JSON. La fuente entrena en `fit`,
-una vez por fold, y `recommend` solo puntúa esa red.
+una vez por fold, y `recommend` solo puntúa esa red. La bolsa del lector se
+arma con el historial que recibe `recommend`, sobre el vocabulario congelado.

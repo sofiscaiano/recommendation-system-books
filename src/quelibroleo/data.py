@@ -14,6 +14,18 @@ DATE_COL = "fecha"
 RATING_COL = "rating"
 
 
+def object_ids(values: pd.Series) -> pd.Series:
+    """Ids como ``object``.
+
+    ``isin`` de ``string[pyarrow]`` contra un diccionario grande tarda más de
+    100 ms aunque la serie tenga una sola fila.
+    """
+
+    if values.dtype == object:
+        return values
+    return values.astype(object)
+
+
 @dataclass(frozen=True)
 class DataQualityReport:
     """Resumen de anomalías detectadas durante la carga."""

@@ -29,7 +29,7 @@ from torch import nn
 
 from .baselines import PopularityRecommender
 from .config import PipelineConfig, TwoTowerConfig
-from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
+from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, object_ids
 from .metrics import ndcg_at_k
 from .source_models import (
     TwoTowerParameters,
@@ -107,9 +107,11 @@ def build_vocabulary(history: pd.DataFrame, books: pd.DataFrame, min_reads: int)
 def build_sequences(history: pd.DataFrame, vocabulary: Vocabulary) -> Sequences:
     """Historia de cada lector, por fecha e id_libro, restringida al vocabulario."""
 
-    kept = history[history[ITEM_COL].isin(vocabulary.item_index)].sort_values(
+    items = object_ids(history[ITEM_COL])
+    kept = history.loc[items.isin(vocabulary.item_index)].sort_values(
         [USER_COL, DATE_COL, ITEM_COL], kind="mergesort"
     )
+    kept[ITEM_COL] = object_ids(kept[ITEM_COL])
     users, starts, lengths = np.unique(
         kept[USER_COL].to_numpy(dtype=str), return_index=True, return_counts=True
     )
@@ -418,39 +420,86 @@ def train_weights(
     )
 
 
+class LoadedTower:
+    """Red cargada para puntuar. Los pesos no se tocan."""
+
+    def __init__(self, weights: TwoTowerWeights) -> None:
+        self.vocabulary = Vocabulary(
+            item_ids=weights.item_ids,
+            item_index={item: index for index, item in enumerate(weights.item_ids)},
+            item_author=weights.item_author,
+            item_genre=weights.item_genre,
+            n_authors=weights.n_authors,
+            n_genres=weights.n_genres,
+            log_q=weights.log_q,
+        )
+        self._stored = Sequences(
+            position=weights.position,
+            starts=weights.starts,
+            lengths=weights.lengths,
+            items=weights.items,
+            ratings=weights.ratings,
+        )
+        self.net = TwoTowerNet(self.vocabulary, weights.block)
+        self.net.load_state_dict(
+            {name: torch.as_tensor(value) for name, value in weights.state.items()}
+        )
+        self.net.eval()
+
+    def score(
+        self,
+        users: list[str],
+        n: int,
+        history: pd.DataFrame | None = None,
+    ) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
+        """Top-n. Con historial, la bolsa es esa historia sobre el vocabulario fijo."""
+
+        sequences = self._stored if history is None else _sequences_from_history(
+            history, users, self.vocabulary
+        )
+        known = [str(user) for user in users if str(user) in sequences.position]
+        if not known or n < 1:
+            empty = np.empty((0, 0))
+            return [], empty.astype(np.int64), empty.astype(np.float32), self.vocabulary.item_ids
+        indices, scores = _top_items(self.net, sequences, known, k=n)
+        return known, indices, scores, self.vocabulary.item_ids
+
+
+def _sequences_from_history(
+    history: pd.DataFrame,
+    users: list[str],
+    vocabulary: Vocabulary,
+) -> Sequences:
+    """Secuencia de esos lectores. Un libro fuera del vocabulario no entra en la bolsa."""
+
+    wanted = {str(user) for user in users}
+    columns = [USER_COL, ITEM_COL, DATE_COL, RATING_COL]
+    if history.empty:
+        subset = pd.DataFrame({column: pd.Series(dtype="object") for column in columns})
+    else:
+        mask = history[USER_COL].astype(str).isin(wanted)
+        subset = history.loc[mask, columns].copy()
+        subset[USER_COL] = subset[USER_COL].astype(str)
+        subset[ITEM_COL] = subset[ITEM_COL].astype(str)
+        subset[DATE_COL] = pd.to_datetime(subset[DATE_COL])
+    return build_sequences(subset, vocabulary)
+
+
+def load_tower(weights: TwoTowerWeights) -> LoadedTower:
+    """Carga la red una vez. Sirve para puntuar varios pedidos sin reentrenar."""
+
+    return LoadedTower(weights)
+
+
 def score_weights(
     weights: TwoTowerWeights,
     users: list[str],
     n: int,
+    history: pd.DataFrame | None = None,
 ) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
     """Top-n de una red ya entrenada. No ajusta pesos ni elige épocas."""
 
-    vocabulary = Vocabulary(
-        item_ids=weights.item_ids,
-        item_index={item: index for index, item in enumerate(weights.item_ids)},
-        item_author=weights.item_author,
-        item_genre=weights.item_genre,
-        n_authors=weights.n_authors,
-        n_genres=weights.n_genres,
-        log_q=weights.log_q,
-    )
-    sequences = Sequences(
-        position=weights.position,
-        starts=weights.starts,
-        lengths=weights.lengths,
-        items=weights.items,
-        ratings=weights.ratings,
-    )
-    net = TwoTowerNet(vocabulary, weights.block)
-    net.load_state_dict(
-        {name: torch.as_tensor(value) for name, value in weights.state.items()}
-    )
-    known = [str(user) for user in users if str(user) in sequences.position]
-    if not known:
-        empty = np.empty((0, 0))
-        return [], empty.astype(np.int64), empty.astype(np.float32), vocabulary.item_ids
-    indices, scores = _top_items(net, sequences, known, k=n)
-    return known, indices, scores, vocabulary.item_ids
+    return load_tower(weights).score(users, n, history)
 
 
 def tune_two_tower(

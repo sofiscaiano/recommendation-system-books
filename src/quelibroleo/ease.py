@@ -28,7 +28,7 @@ from scipy import sparse
 
 from .baselines import PopularityRecommender
 from .config import EaseConfig, PipelineConfig
-from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, observed_catalog
+from .data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, object_ids, observed_catalog
 from .metrics import ndcg_at_k
 from .split_data import SplitData, example_users, validation_folds
 
@@ -244,8 +244,8 @@ def _matrix_for_users(
     if not item_index:
         return sparse.csr_matrix((len(users), 0), dtype=np.float64)
     user_index = {user: index for index, user in enumerate(users)}
-    columns = frame[ITEM_COL].astype(str).map(item_index)
-    rows = frame[USER_COL].astype(str).map(user_index)
+    columns = object_ids(frame[ITEM_COL]).map(item_index)
+    rows = object_ids(frame[USER_COL]).map(user_index)
     mask = columns.notna() & rows.notna()
     weights = _profile_weights(frame, half_life_days)
     return sparse.csr_matrix(

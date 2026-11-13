@@ -98,6 +98,64 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     assert again.reset_index(drop=True).equals(candidates.reset_index(drop=True))
 
 
+def test_request_history_moves_the_bag_without_training(monkeypatch) -> None:
+    history = _history()
+    config = PipelineConfig(
+        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
+        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+    )
+    weights = train_weights(history, _books(history), config)
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("puntuar no vuelve a entrenar")
+
+    monkeypatch.setattr("quelibroleo.two_tower.fit_history", fail_if_called)
+    stored_users, stored_indices, stored_scores, _item_ids = score_weights(weights, ["u0"], 5)
+    same_users, same_indices, same_scores, _item_ids = score_weights(weights, ["u0"], 5, history)
+    assert same_users == stored_users
+    assert same_indices.tolist() == stored_indices.tolist()
+    assert np.allclose(same_scores, stored_scores)
+
+    added = str(weights.item_ids[int(stored_indices[0, 0])])
+    extra = history.iloc[:1].copy()
+    extra["id_lector"] = "u0"
+    extra["id_libro"] = added
+    extra["fecha"] = history["fecha"].max() + pd.Timedelta(days=1)
+    newbie = history.loc[history["id_lector"] == "u1"].copy()
+    newbie["id_lector"] = "recien"
+    extended = pd.concat([history, extra, newbie], ignore_index=True)
+    known, indices, _scores, item_ids = score_weights(weights, ["u0", "recien"], 5, extended)
+    by_user = {
+        user: {str(item_ids[index]) for index in row if index >= 0}
+        for user, row in zip(known, indices, strict=True)
+    }
+    assert added not in by_user["u0"]
+    assert "recien" in by_user
+    assert by_user["recien"].isdisjoint(set(newbie["id_libro"]))
+
+
+def test_recommend_uses_the_request_history() -> None:
+    history = _history()
+    config = PipelineConfig(
+        split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
+        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+    )
+    source = TwoTowerRetriever(config).fit(history, _books(history))
+    first = source.recommend(["u0"], history, n=5)
+    added = str(first.iloc[0]["id_libro"])
+    extra = history.iloc[:1].copy()
+    extra["id_lector"] = "u0"
+    extra["id_libro"] = added
+    extra["fecha"] = history["fecha"].max() + pd.Timedelta(days=1)
+    extended = pd.concat([history, extra], ignore_index=True)
+
+    second = source.recommend(["u0"], extended, n=5)
+
+    assert added not in set(second["id_libro"])
+    assert second["id_libro"].tolist() != first["id_libro"].tolist()
+    source._stop_worker()
+
+
 def test_scoring_does_not_train_again(monkeypatch) -> None:
     history = _history()
     config = PipelineConfig(

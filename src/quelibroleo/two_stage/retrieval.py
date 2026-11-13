@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
+from multiprocessing.queues import Queue
 from typing import Any, Protocol
 
 import numpy as np
@@ -14,7 +16,7 @@ from sklearn.preprocessing import normalize
 
 from ..baselines import PopularityRecommender
 from ..config import PipelineConfig
-from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
+from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL, object_ids
 from ..ease import (
     EaseParameters,
     EaseSpectrum,
@@ -165,10 +167,13 @@ class ItemCosineRetriever:
         rows: list[dict[str, object]] = []
         user_ids = [str(user) for user in users]
         user_position = {user: index for index, user in enumerate(user_ids)}
-        usable = history[
-            history[USER_COL].isin(user_position)
-            & history[ITEM_COL].isin(self.item_index_)
+        history_users = object_ids(history[USER_COL])
+        history_items = object_ids(history[ITEM_COL])
+        usable = history.loc[
+            history_users.isin(user_position) & history_items.isin(self.item_index_)
         ].copy()
+        usable[USER_COL] = object_ids(usable[USER_COL])
+        usable[ITEM_COL] = object_ids(usable[ITEM_COL])
         if usable.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
         query_weights = usable[RATING_COL].to_numpy(dtype=np.float32) / 10.0
@@ -337,15 +342,17 @@ class ImplicitMFRetriever:
         item_index = {str(item): index for index, item in enumerate(self.item_ids_)}
         if history.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
-        usable = history[
-            (history[USER_COL].astype(str) == user_id)
-            & history[ITEM_COL].astype(str).isin(item_index)
+        history_users = object_ids(history[USER_COL])
+        history_items = object_ids(history[ITEM_COL])
+        usable = history.loc[
+            (history_users == user_id) & history_items.isin(item_index)
         ].copy()
+        usable[ITEM_COL] = object_ids(usable[ITEM_COL])
         if usable.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
 
         confidence = _implicit_confidence(usable, self.half_life_days)
-        indices = usable[ITEM_COL].astype(str).map(item_index).to_numpy(dtype=int)
+        indices = usable[ITEM_COL].map(item_index).to_numpy(dtype=int)
         row = sparse.csr_matrix(
             (
                 confidence.astype(np.float32),
@@ -370,6 +377,100 @@ class ImplicitMFRetriever:
                 "rank": list(range(1, len(item_indices) + 1)),
             }
         )
+
+    def recommend_with_history(
+        self,
+        user_id: str,
+        history: pd.DataFrame,
+        n: int,
+    ) -> pd.DataFrame:
+        """BPR con el historial del pedido, sin reentrenar los factores de libro.
+
+        Si la confianza de cada libro coincide con la del ajuste, devuelve el
+        mismo ranking. Si hay lecturas nuevas o notas distintas, corre el
+        factor guardado hacia esos libros y rankea con los factores de libro
+        congelados.
+        """
+
+        if self.algorithm != "bpr":
+            raise RuntimeError("El ajuste con historial nuevo solo está definido para BPR")
+        if self.model_ is None or self.item_ids_ is None or self.user_item_ is None:
+            raise RuntimeError("El retriever debe entrenarse antes de recomendar")
+        user_id = str(user_id)
+        requested = self._confidence_by_item(user_id, history)
+        stored_index = self.user_index_.get(user_id)
+        stored = {} if stored_index is None else _row_confidence(self.user_item_[stored_index])
+        if stored_index is not None and _same_confidence(requested, stored):
+            return self.recommend([user_id], history, n)
+        if not requested and stored_index is None:
+            return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+
+        item_factors = np.asarray(self.model_.item_factors, dtype=np.float32)
+        if stored_index is None:
+            user_factor = np.zeros(item_factors.shape[1], dtype=np.float32)
+        else:
+            user_factor = np.array(self.model_.user_factors[stored_index], dtype=np.float32, copy=True)
+        pull = np.zeros(item_factors.shape[1], dtype=np.float32)
+        weight = 0.0
+        for item_index in set(requested) | set(stored):
+            delta = requested.get(item_index, 0.0) - stored.get(item_index, 0.0)
+            if abs(delta) < 1e-5:
+                continue
+            pull += np.float32(delta) * item_factors[item_index]
+            weight += abs(delta)
+        if weight < 1e-5:
+            if stored_index is None:
+                return pd.DataFrame(columns=CANDIDATE_COLUMNS)
+            return self.recommend([user_id], history, n)
+        if stored_index is None:
+            user_factor = pull / np.float32(weight)
+        else:
+            user_factor = (user_factor + pull) / np.float32(1.0 + weight)
+        scores = item_factors @ user_factor
+        seen = {str(self.item_ids_[item_index]) for item_index in requested}
+        rows = _rank_scores(user_id, self.item_ids_, scores, self.source_name, n, seen)
+        return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
+
+    def _confidence_by_item(self, user_id: str, history: pd.DataFrame) -> dict[int, float]:
+        """Confianza de cada libro de este lector que está en el modelo."""
+
+        if self.item_ids_ is None or history.empty:
+            return {}
+        item_index = {str(item): index for index, item in enumerate(self.item_ids_)}
+        history_users = object_ids(history[USER_COL])
+        history_items = object_ids(history[ITEM_COL])
+        usable = history.loc[
+            (history_users == user_id) & history_items.isin(item_index)
+        ].copy()
+        usable[ITEM_COL] = object_ids(usable[ITEM_COL])
+        if usable.empty:
+            return {}
+        usable = usable.sort_values(DATE_COL, kind="mergesort").drop_duplicates(
+            ITEM_COL, keep="last"
+        )
+        confidence = _implicit_confidence(usable, self.half_life_days)
+        indices = usable[ITEM_COL].map(item_index).to_numpy(dtype=int)
+        return {
+            int(index): float(value)
+            for index, value in zip(indices, confidence, strict=True)
+        }
+
+
+def _row_confidence(row: sparse.spmatrix) -> dict[int, float]:
+    """Índice de libro a confianza en una fila dispersa."""
+
+    return {
+        int(index): float(value)
+        for index, value in zip(row.indices, row.data, strict=True)
+    }
+
+
+def _same_confidence(left: dict[int, float], right: dict[int, float]) -> bool:
+    """True si las dos confianzas coinciden libro a libro."""
+
+    if left.keys() != right.keys():
+        return False
+    return all(abs(left[item] - right[item]) <= 1e-4 for item in left)
 
 
 class TfidfRetriever:
@@ -444,10 +545,13 @@ class TfidfRetriever:
         rows: list[dict[str, object]] = []
         user_ids = [str(user) for user in users]
         user_position = {user: index for index, user in enumerate(user_ids)}
-        usable = history[
-            history[USER_COL].isin(user_position)
-            & history[ITEM_COL].isin(self.item_index_)
+        history_users = object_ids(history[USER_COL])
+        history_items = object_ids(history[ITEM_COL])
+        usable = history.loc[
+            history_users.isin(user_position) & history_items.isin(self.item_index_)
         ].copy()
+        usable[USER_COL] = object_ids(usable[USER_COL])
+        usable[ITEM_COL] = object_ids(usable[ITEM_COL])
         if usable.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
         weights = (
@@ -498,21 +602,37 @@ def _train_two_tower(history: pd.DataFrame, books: pd.DataFrame, config: Pipelin
     return train_weights(history, books, config)
 
 
-def _score_two_tower(weights: object, users: list[str], n: int) -> tuple:
-    """Corre en el proceso hijo y solo puntúa la red que devolvió ``fit``."""
+def _serve_two_tower(weights: object, inbox: Queue, outbox: Queue) -> None:
+    """Proceso hijo: carga la red una vez y puntúa cada pedido con su historial."""
 
-    from ..two_tower import score_weights
+    try:
+        from ..two_tower import load_tower
 
-    return score_weights(weights, users, n)
+        tower = load_tower(weights)
+    except Exception as exc:  # noqa: BLE001 - el hijo devuelve cualquier falla de la carga
+        outbox.put(("err", RuntimeError(f"{type(exc).__name__}: {exc}")))
+        return
+    outbox.put(("ready", None))
+    while True:
+        message = inbox.get()
+        if message is None:
+            break
+        users, history, n = message
+        try:
+            outbox.put(("ok", tower.score(users, n, history)))
+        except Exception as exc:  # noqa: BLE001 - el hijo devuelve cualquier falla al puntuar
+            outbox.put(("err", RuntimeError(f"{type(exc).__name__}: {exc}")))
 
 
 class TwoTowerRetriever:
     """El two-tower como fuente. Entrena en ``fit`` y puntúa en ``recommend``.
 
     torch y LightGBM cargan copias distintas de libomp y juntas se caen en
-    macOS (LightGBM #6595). Este proceso nunca importa torch: tanto el
-    entrenamiento como el top-n corren en un proceso hijo. ``recommend`` no
-    vuelve a elegir épocas ni a reentrenar; usa los pesos de ``fit``.
+    macOS (LightGBM #6595). Este proceso nunca importa torch: el entrenamiento
+    y el top-n corren en un proceso hijo. ``recommend`` no vuelve a elegir
+    épocas ni a reentrenar. La bolsa del lector sale del historial recibido,
+    sobre el vocabulario congelado en ``fit``. El hijo queda vivo para no
+    volver a importar torch en cada pedido.
     """
 
     source_name = "two_tower"
@@ -520,11 +640,16 @@ class TwoTowerRetriever:
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
         self._weights: object | None = None
+        self._process: Any = None
+        self._inbox: Queue | None = None
+        self._outbox: Queue | None = None
+        self._lock = threading.Lock()
 
     def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> TwoTowerRetriever:
         from concurrent.futures import ProcessPoolExecutor
         from multiprocessing import get_context
 
+        self._stop_worker()
         with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
             self._weights = pool.submit(
                 _train_two_tower, interactions, catalog, self.config
@@ -535,25 +660,27 @@ class TwoTowerRetriever:
         )
         return self
 
+    def warm(self) -> None:
+        """Arranca el hijo y carga la red. El primer pedido no paga ese costo."""
+
+        if self._weights is None:
+            return
+        with self._lock:
+            self._ensure_worker()
+
     def recommend(
         self,
         users: list[str] | tuple[str, ...],
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        del history
         if self._weights is None:
             raise RuntimeError("El recomendador debe entrenarse antes de recomendar")
-        from concurrent.futures import ProcessPoolExecutor
-        from multiprocessing import get_context
-
-        with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
-            known, indices, scores, item_ids = pool.submit(
-                _score_two_tower,
-                self._weights,
-                [str(user) for user in users],
-                n,
-            ).result()
+        known, indices, scores, item_ids = self._ask(
+            [str(user) for user in users],
+            history,
+            n,
+        )
         if not known:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
         valid = indices >= 0
@@ -566,6 +693,88 @@ class TwoTowerRetriever:
                 "rank": np.nonzero(valid)[1] + 1,
             }
         )
+
+    def _ask(self, users: list[str], history: pd.DataFrame, n: int) -> tuple:
+        """Manda un pedido al hijo y espera el top-n."""
+
+        with self._lock:
+            self._ensure_worker()
+            assert self._inbox is not None
+            assert self._outbox is not None
+            self._inbox.put((users, history, n))
+            try:
+                status, payload = self._outbox.get(timeout=180)
+            except Exception as exc:
+                self._stop_worker()
+                raise RuntimeError("El proceso del two-tower no respondió") from exc
+        if status != "ok":
+            raise payload
+        return payload
+
+    def _ensure_worker(self) -> None:
+        """Deja un hijo con la red cargada. Hay que llamarlo con el lock tomado."""
+
+        if self._process is not None and self._process.is_alive():
+            return
+        from multiprocessing import get_context
+
+        context = get_context("spawn")
+        self._inbox = context.Queue()
+        self._outbox = context.Queue()
+        self._process = context.Process(
+            target=_serve_two_tower,
+            args=(self._weights, self._inbox, self._outbox),
+        )
+        self._process.start()
+        try:
+            status, payload = self._outbox.get(timeout=180)
+        except Exception as exc:
+            self._stop_worker()
+            raise RuntimeError("El proceso del two-tower no llegó a cargar la red") from exc
+        if status != "ready":
+            self._stop_worker()
+            raise payload
+
+    def _stop_worker(self) -> None:
+        """Cierra el hijo. El artefacto no guarda el proceso."""
+
+        process = self._process
+        inbox = self._inbox
+        self._process = None
+        self._inbox = None
+        self._outbox = None
+        if process is None:
+            return
+        if process.is_alive() and inbox is not None:
+            try:
+                inbox.put(None)
+                process.join(timeout=2)
+            except (OSError, ValueError, RuntimeError):
+                process.terminate()
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["_process"] = None
+        state["_inbox"] = None
+        state["_outbox"] = None
+        state["_lock"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._process = None
+        self._inbox = None
+        self._outbox = None
+        self._lock = threading.Lock()
+
+    def __del__(self) -> None:
+        try:
+            self._stop_worker()
+        except (OSError, ValueError, RuntimeError):
+            return
 
 
 class EaseRetriever:

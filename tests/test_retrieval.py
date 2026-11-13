@@ -12,6 +12,7 @@ from quelibroleo.ease import EaseParameters
 from quelibroleo.two_stage.retrieval import (
     CandidateFusion,
     EaseRetriever,
+    ImplicitMFRetriever,
     ItemCosineRetriever,
     build_default_retrievers,
     per_source_depth,
@@ -45,6 +46,34 @@ def tiny_data() -> tuple[pd.DataFrame, pd.DataFrame]:
         }
     )
     return interactions, catalog
+
+
+def test_bpr_uses_new_reads_without_refitting() -> None:
+    interactions, catalog = tiny_data()
+    retriever = ImplicitMFRetriever("bpr", factors=8, iterations=5, random_state=0)
+    retriever.fit(interactions, catalog)
+    user = interactions.loc[interactions["id_lector"] == "u1"]
+    baseline = retriever.recommend(["u1"], user, n=2)
+    same = retriever.recommend_with_history("u1", user, n=2)
+
+    assert same["id_libro"].tolist() == baseline["id_libro"].tolist()
+    assert same["score"].tolist() == baseline["score"].tolist()
+
+    extra = user.iloc[:1].copy()
+    extra["id_libro"] = "b4"
+    extra["fecha"] = user["fecha"].max() + pd.Timedelta(days=1)
+    extra["rating"] = 10
+    extended = pd.concat([user, extra], ignore_index=True)
+    moved = retriever.recommend_with_history("u1", extended, n=2)
+
+    assert set(moved["id_libro"]).isdisjoint({"b1", "b2", "b4"})
+    assert moved["id_libro"].tolist() == ["b3"]
+
+    newbie = user.copy()
+    newbie["id_lector"] = "nuevo"
+    cold = retriever.recommend_with_history("nuevo", newbie, n=2)
+    assert set(cold["id_libro"]).isdisjoint(set(newbie["id_libro"]))
+    assert len(cold) == 2
 
 
 def test_popularity_and_item_cosine_exclude_seen_items() -> None:
