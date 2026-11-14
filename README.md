@@ -107,10 +107,3 @@ Un baseline sin búsqueda:
 ```bash
 uv run python main.py evaluate --model popularity --note "baseline de popularidad"
 ```
-
-## Pruebas
-
-```bash
-uv run pytest
-uv run ruff check src tests main.py
-```
