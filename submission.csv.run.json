@@ -1,0 +1,37 @@
+{
+  "run_name": "20261112-184808-two_stage-submit-tuned-280e",
+  "mlflow_run_id": "55548822aa0e41b79c3fb70d3b225080",
+  "git_commit": "b69de54e4a109e35d3f19fe0149623ba5fc50e64",
+  "git_dirty": true,
+  "hyperparameters_origin": "saved",
+  "hyperparameters_run_name": "20261112-003219-two_stage-evaluate-tune-0cc6",
+  "hyperparameters": {
+    "rrf_cutoff": 843,
+    "source_weights": {
+      "als": 0.07115240924260251,
+      "bpr": 0.047134966967588746,
+      "ease": 0.04584596253553257,
+      "item_cosine": 0.06147214229943222,
+      "popularidad": 0.2661493283557125,
+      "tfidf": 0.4159544956625124,
+      "two_tower": 0.09229069493661915
+    },
+    "ranker": {
+      "n_estimators": 200,
+      "learning_rate": 0.03637623663680932,
+      "num_leaves": 66,
+      "max_depth": 11,
+      "min_child_samples": 85,
+      "subsample": 0.7294029513195903,
+      "colsample_bytree": 0.6597872870301511,
+      "reg_alpha": 4.155961356069608e-06,
+      "reg_lambda": 0.0002912909455786461,
+      "early_stopping_rounds": 30,
+      "label_gain": "exponential"
+    }
+  },
+  "note": "nuevas variables",
+  "seed": 42,
+  "csv_sha256": "634f52272034e2debfa383dc54cea696384dd413ca7651e58ef6f3be9ac89b22",
+  "output": "submission.csv"
+}

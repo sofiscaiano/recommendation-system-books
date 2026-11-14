@@ -1,0 +1,12 @@
+{
+  "run_name": "20261031-181038-two_stage-evaluate-tuned-b865",
+  "submit_ndcg_at_20": 0.12300679631109641,
+  "submit_baseline_ndcg_at_20": 0.027609629703253143,
+  "submit_users": 671,
+  "model_ndcg_at_20": 0.19446304737632597,
+  "baseline_ndcg_at_20": 0.07216983649200234,
+  "retrieval_recall": 0.5106833114323258,
+  "retrieval_oracle_ndcg_at_20": 0.6417259567709906,
+  "candidate_budget": 429,
+  "evaluation_users": 3805
+}
