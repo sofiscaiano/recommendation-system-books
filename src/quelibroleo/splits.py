@@ -1,5 +1,3 @@
-"""Splits temporales locales por lector."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,8 +10,6 @@ from .data import DATE_COL, ITEM_COL, USER_COL
 
 @dataclass(frozen=True)
 class TemporalSplit:
-    """Partición temporal con usuarios evaluables explícitos."""
-
     train: pd.DataFrame
     test: pd.DataFrame
     evaluation_users: tuple[str, ...]
@@ -22,8 +18,6 @@ class TemporalSplit:
 
 @dataclass(frozen=True)
 class RollingFold:
-    """Fold interno de origen móvil."""
-
     fold: int
     train: pd.DataFrame
     target: pd.DataFrame
@@ -31,8 +25,6 @@ class RollingFold:
 
 
 def _ordered(interactions: pd.DataFrame) -> pd.DataFrame:
-    """Ordena por lector, fecha e id_libro y numera la posición dentro del lector."""
-
     required = {USER_COL, ITEM_COL, DATE_COL}
     missing = required - set(interactions.columns)
     if missing:
@@ -55,12 +47,6 @@ def leave_last_k(
     interactions: pd.DataFrame,
     k: int = 20,
 ) -> TemporalSplit:
-    """Reserva exactamente las últimas ``k`` filas de lectores con más de k.
-
-    Los empates diarios se resuelven por ``id_libro`` para asegurar
-    reproducibilidad. Los lectores no evaluables quedan completos en train.
-    """
-
     if k < 1:
         raise ValueError("k debe ser positivo")
 
@@ -87,14 +73,6 @@ def rolling_origin_folds(
     horizon: int = 20,
     min_history: int = 5,
 ) -> list[RollingFold]:
-    """Genera folds relativos al final del historial de cada lector.
-
-    Para un fold, cada lector elegible aporta un prefijo y la ventana siguiente.
-    Los lectores demasiado cortos para ser query se conservan completos como
-    señal auxiliar. Esto evita usar el futuro del mismo lector, aunque —como
-    todo split local— no impone un único corte calendario entre lectores.
-    """
-
     if n_folds < 1 or horizon < 1 or min_history < 1:
         raise ValueError("n_folds, horizon y min_history deben ser positivos")
 
@@ -117,17 +95,15 @@ def rolling_origin_folds(
 
         train_mask = (~is_query) | (ordered["_position"] < starts)
         target_mask = (
-            is_query
-            & (ordered["_position"] >= starts)
-            & (ordered["_position"] < ends)
+            is_query & (ordered["_position"] >= starts) & (ordered["_position"] < ends)
         )
 
         helper_columns = ["_position", "_user_size"]
-        target = ordered.loc[target_mask].drop(columns=helper_columns).reset_index(
-            drop=True
+        target = (
+            ordered.loc[target_mask].drop(columns=helper_columns).reset_index(drop=True)
         )
-        train = ordered.loc[train_mask].drop(columns=helper_columns).reset_index(
-            drop=True
+        train = (
+            ordered.loc[train_mask].drop(columns=helper_columns).reset_index(drop=True)
         )
         query_users = tuple(sorted(target[USER_COL].drop_duplicates().astype(str)))
         if query_users:
@@ -146,8 +122,6 @@ def rolling_origin_folds(
 
 
 def assert_no_within_user_leakage(fold: RollingFold) -> None:
-    """Valida que el prefijo de cada query sea anterior a su target."""
-
     query_train = fold.train[fold.train[USER_COL].isin(fold.query_users)]
     train_max = query_train.groupby(USER_COL)[DATE_COL].max()
     target_min = fold.target.groupby(USER_COL)[DATE_COL].min()

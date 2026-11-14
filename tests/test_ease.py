@@ -1,5 +1,3 @@
-"""EASE como modelo único, sin tocar el tuneo de two_stage."""
-
 from __future__ import annotations
 
 import json
@@ -174,7 +172,9 @@ def test_gram_uses_the_rating_and_not_the_date() -> None:
     assert early_matrix.sum() == pytest.approx(12)
 
 
-def test_dense_item_cap_rejects_an_oversized_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dense_item_cap_rejects_an_oversized_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("quelibroleo.ease.MAX_ITEMS", 1)
     frame = _frame(
         [
@@ -200,7 +200,12 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
     for user, start in (("u1", 0), ("u2", 2)):
         for offset in range(10):
             rows.append(
-                (user, f"b{start + offset}", f"2020-01-{offset + 1:02d}", 6 + offset % 4)
+                (
+                    user,
+                    f"b{start + offset}",
+                    f"2020-01-{offset + 1:02d}",
+                    6 + offset % 4,
+                )
             )
     frame = _frame(rows)
     two_stage = tmp_path / "tuned_hyperparameters.json"
@@ -224,7 +229,9 @@ def test_tune_writes_ease_file_and_keeps_two_stage_file(tmp_path) -> None:
     model = build_model("ease", config)
     model.fit(_split(frame), tune=True)
 
-    saved = json.loads((tmp_path / "ease_hyperparameters.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / "ease_hyperparameters.json").read_text(encoding="utf-8")
+    )
     assert two_stage.read_text(encoding="utf-8") == "{}\n"
     assert saved["min_interactions"] in {1, 2}
     assert saved["reg_lambda"] > 0
@@ -247,7 +254,12 @@ def test_tune_on_example_users_requires_those_readers(tmp_path) -> None:
     for user, start in (("u1", 0), ("u2", 2)):
         for offset in range(10):
             rows.append(
-                (user, f"b{start + offset}", f"2020-01-{offset + 1:02d}", 6 + offset % 4)
+                (
+                    user,
+                    f"b{start + offset}",
+                    f"2020-01-{offset + 1:02d}",
+                    6 + offset % 4,
+                )
             )
     config = PipelineConfig(
         artifacts_dir=tmp_path,

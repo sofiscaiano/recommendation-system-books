@@ -78,9 +78,7 @@ def test_bpr_uses_new_reads_without_refitting() -> None:
 
 def test_popularity_and_item_cosine_exclude_seen_items() -> None:
     interactions, catalog = tiny_data()
-    popularity = PopularityRecommender().fit(
-        interactions, set(catalog["id_libro"])
-    )
+    popularity = PopularityRecommender().fit(interactions, set(catalog["id_libro"]))
     popular = popularity.recommend(["u1"], interactions, 3)
     assert set(popular["id_libro"]).isdisjoint({"b1", "b2"})
 
@@ -132,7 +130,9 @@ def test_weight_scale_does_not_change_the_fused_ranking() -> None:
     base = CandidateFusion(weights={"a": 1.0, "b": 2.0}).fuse(candidates, 3)
     scaled = CandidateFusion(weights={"a": 10.0, "b": 20.0}).fuse(candidates, 3)
 
-    assert scaled.candidates["id_libro"].tolist() == base.candidates["id_libro"].tolist()
+    assert (
+        scaled.candidates["id_libro"].tolist() == base.candidates["id_libro"].tolist()
+    )
 
 
 def test_default_retrievers_keep_sources_that_change_the_candidate_set() -> None:
@@ -223,7 +223,9 @@ def test_each_source_reuses_its_own_saved_parameters(tmp_path) -> None:
         encoding="utf-8",
     )
     config = PipelineConfig(artifacts_dir=tmp_path)
-    by_name = {retriever.source_name: retriever for retriever in retrievers_from_config(config)}
+    by_name = {
+        retriever.source_name: retriever for retriever in retrievers_from_config(config)
+    }
 
     assert by_name["als"].factors == 32
     assert by_name["als"].iterations == 7

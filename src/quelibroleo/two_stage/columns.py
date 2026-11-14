@@ -1,11 +1,3 @@
-"""Tabla numérica que el LambdaRank de ``two_stage`` usa para ordenar candidatos.
-
-Retrieval ya eligió los libros. Acá cada candidato se describe con scores de
-las fuentes, estadísticas de lector e ítem, afinidad de autor y género, y
-señales de la secuencia de lectura. El género del lector entra como 1 (mujer)
-o 0 (hombre). Un modelo único, sin etapa de retrieval, no usa este archivo.
-"""
-
 from __future__ import annotations
 
 import re
@@ -17,33 +9,26 @@ import pandas as pd
 from ..data import DATE_COL, ITEM_COL, RATING_COL, USER_COL
 
 _GENDER_CODE = {"Mujer": 1, "Hombre": 0}
-# Últimas lecturas del lector que entran al promedio, y cuántas lecturas
-# hacia adelante cuenta cada una al estimar la probabilidad.
+
 _TRANSITION_LAGS = 5
 _TRANSITION_HORIZON = 5
-# La más reciente pesa 5 y la más antigua de la ventana pesa 1.
+
 _TRANSITION_WEIGHTS = {
     lag: float(_TRANSITION_LAGS - lag + 1) for lag in range(1, _TRANSITION_LAGS + 1)
 }
 
 
 def _safe_source(value: str) -> str:
-    """Deja el nombre de una fuente usable como sufijo de columna."""
-
     return re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_").lower()
 
 
 @dataclass(frozen=True)
 class RankerTable:
-    """Filas de candidatos y los nombres de las columnas numéricas del ranker."""
-
     frame: pd.DataFrame
     feature_columns: tuple[str, ...]
 
 
 class ColumnBuilder:
-    """Arma esas columnas a partir del historial anterior al corte."""
-
     def __init__(self, recent_n: int = 10, smoothing: float = 10.0) -> None:
         self.recent_n = recent_n
         self.smoothing = smoothing
@@ -69,8 +54,6 @@ class ColumnBuilder:
         catalog: pd.DataFrame,
         readers: pd.DataFrame | None = None,
     ) -> ColumnBuilder:
-        """Estima estadísticas de lector, ítem, autor, género y transiciones."""
-
         metadata_columns = [
             ITEM_COL,
             "autor",
@@ -89,9 +72,7 @@ class ColumnBuilder:
         self.readers_ = _reader_demographics(readers)
         self.global_mean_ = float(train[RATING_COL].mean())
 
-        ordered = train.sort_values(
-            [USER_COL, DATE_COL, ITEM_COL], kind="mergesort"
-        )
+        ordered = train.sort_values([USER_COL, DATE_COL, ITEM_COL], kind="mergesort")
         enriched = ordered.merge(metadata, on=ITEM_COL, how="left")
         enriched[["autor", "genero"]] = enriched[["autor", "genero"]].fillna("")
 
@@ -121,16 +102,12 @@ class ColumnBuilder:
         self.user_stats_ = _attach_median_popularity(
             self.user_stats_, enriched, item_stats
         )
-        self.author_stats_ = (
-            enriched.groupby("autor", as_index=False)
-            .agg(
-                author_read_count=(ITEM_COL, "size"),
-                author_mean_rating=(RATING_COL, "mean"),
-            )
+        self.author_stats_ = enriched.groupby("autor", as_index=False).agg(
+            author_read_count=(ITEM_COL, "size"),
+            author_mean_rating=(RATING_COL, "mean"),
         )
-        self.genre_stats_ = (
-            enriched.groupby("genero", as_index=False)
-            .agg(genre_read_count=(ITEM_COL, "size"))
+        self.genre_stats_ = enriched.groupby("genero", as_index=False).agg(
+            genre_read_count=(ITEM_COL, "size")
         )
 
         self.author_transition_ = _transition_probabilities(
@@ -157,8 +134,6 @@ class ColumnBuilder:
         return self
 
     def _user_activity_tables(self, enriched: pd.DataFrame) -> dict[str, pd.DataFrame]:
-        """Estadísticas, afinidades y últimos ítems de cada lector."""
-
         work = enriched.copy()
         work["_read_year"] = work[DATE_COL].dt.year
         work["_decade"] = work["anio_edicion_num"] // 10 * 10
@@ -261,8 +236,6 @@ class ColumnBuilder:
         }
 
     def user_frames_for(self, history: pd.DataFrame) -> dict[str, pd.DataFrame]:
-        """Tablas de usuario para un historial, sin modificar las de ``fit``."""
-
         if any(
             value is None
             for value in (
@@ -304,8 +277,6 @@ class ColumnBuilder:
         fused_candidates: pd.DataFrame,
         source_candidates: pd.DataFrame,
     ) -> RankerTable:
-        """Arma las columnas numéricas de cada candidato ya fusionado."""
-
         if any(
             value is None
             for value in (
@@ -483,12 +454,6 @@ class ColumnBuilder:
 
 
 def _author_repeat_rate(ordered: pd.DataFrame) -> pd.DataFrame:
-    """Fracción de lecturas, después de la primera, cuyo autor ya había aparecido.
-
-    Un autor vacío no cuenta como lectura ni como autor ya visto. Con una sola
-    lectura con autor el lector no entra y la tasa queda faltante.
-    """
-
     named = ordered.loc[ordered["autor"].ne(""), [USER_COL, "autor"]].copy()
     if named.empty:
         return pd.DataFrame(columns=[USER_COL, "author_repeat_rate"])
@@ -508,12 +473,6 @@ def _attach_author_recency(
     ordered: pd.DataFrame,
     user_stats: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Días desde la última lectura de ese autor y fracción de notas altas.
-
-    Las dos quedan faltantes si el autor está vacío o el lector no lo leyó.
-    Cero días quiere decir que lo leyó el mismo día de su última lectura.
-    """
-
     named = ordered.loc[
         ordered["autor"].ne(""), [USER_COL, "autor", RATING_COL, DATE_COL]
     ]
@@ -551,8 +510,6 @@ def _attach_median_popularity(
     history: pd.DataFrame,
     item_stats: pd.DataFrame | None,
 ) -> pd.DataFrame:
-    """Mediana de ``item_count`` de los libros que el lector ya leyó."""
-
     stats = user_stats.drop(columns="user_median_item_popularity", errors="ignore")
     if item_stats is None or history.empty:
         stats["user_median_item_popularity"] = np.nan
@@ -572,8 +529,6 @@ def _attach_median_popularity(
 
 
 def _reader_demographics(readers: pd.DataFrame | None) -> pd.DataFrame | None:
-    """Género codificado y año de nacimiento. `Mujer` es 1 y `Hombre` es 0."""
-
     if readers is None or readers.empty:
         return None
     frame = readers.drop_duplicates(USER_COL).copy()
@@ -592,8 +547,6 @@ def _attach_reader_demographics(
     user_stats: pd.DataFrame,
     readers: pd.DataFrame | None,
 ) -> pd.DataFrame:
-    """Edad en años: año de la lectura menos año de nacimiento."""
-
     if readers is None:
         user_stats = user_stats.copy()
         user_stats["user_gender"] = np.nan
@@ -607,8 +560,6 @@ def _attach_reader_demographics(
 
 
 def _recent_labels(frame: pd.DataFrame, column: str, prefix: str) -> pd.DataFrame:
-    """Últimas lecturas de un autor o género. El lag 1 es la más reciente."""
-
     tail = frame.groupby(USER_COL, sort=False).tail(_TRANSITION_LAGS).copy()
     tail["_lag"] = tail.groupby(USER_COL, sort=False).cumcount(ascending=False) + 1
     wide = tail.pivot(index=USER_COL, columns="_lag", values=column)
@@ -626,13 +577,6 @@ def _transition_probabilities(
     output: str,
     horizon: int = _TRANSITION_HORIZON,
 ) -> pd.DataFrame:
-    """P(destino | origen): el destino aparece entre las siguientes lecturas.
-
-    Cada lectura con algo después aporta 1 al denominador de su origen. Cada
-    destino distinto dentro de las próximas ``horizon`` lecturas aporta 1 al
-    numerador. El final de la historia, sin lecturas posteriores, no entra.
-    """
-
     position = ordered.groupby(USER_COL, sort=False).cumcount()
     hits: list[pd.DataFrame] = []
     for step in range(1, horizon + 1):
@@ -653,12 +597,8 @@ def _transition_probabilities(
     occurrences = pairs.drop_duplicates([USER_COL, "_pos"])
     totals = occurrences.groupby(previous, sort=False).size().rename("_total")
     distinct = pairs.drop_duplicates([USER_COL, "_pos", current])
-    counts = (
-        distinct.groupby([previous, current], sort=False).size().rename("_pair")
-    )
-    result = counts.reset_index().merge(
-        totals.reset_index(), on=previous, how="left"
-    )
+    counts = distinct.groupby([previous, current], sort=False).size().rename("_pair")
+    result = counts.reset_index().merge(totals.reset_index(), on=previous, how="left")
     result[output] = result["_pair"] / result["_total"]
     return result[[previous, current, output]]
 
@@ -672,12 +612,6 @@ def _window_transition(
     previous: str,
     probability: str,
 ) -> np.ndarray:
-    """Promedio ponderado de P(candidato | cada una de las últimas lecturas).
-
-    Un par que no aparece en el historial aporta 0. Si al lector le falta
-    alguna de las últimas lecturas, ese puesto no entra al denominador.
-    """
-
     lookup = transition.set_index([previous, current])[probability]
     weighted = np.zeros(len(frame), dtype=float)
     weight_sum = np.zeros(len(frame), dtype=float)
@@ -685,9 +619,7 @@ def _window_transition(
     for lag, weight in _TRANSITION_WEIGHTS.items():
         previous_values = frame[f"{lag_prefix}_lag{lag}"]
         present = previous_values.notna().to_numpy()
-        keys = pd.MultiIndex.from_arrays(
-            [previous_values.to_numpy(), current_values]
-        )
+        keys = pd.MultiIndex.from_arrays([previous_values.to_numpy(), current_values])
         found = lookup.reindex(keys).to_numpy(dtype=float)
         found = np.where(np.isnan(found), 0.0, found)
         weighted += np.where(present, found * weight, 0.0)
@@ -703,8 +635,6 @@ def attach_relevance(
     *,
     query_suffix: str = "",
 ) -> RankerTable:
-    """Asigna rating futuro a positivos y cero al resto de candidatos."""
-
     labels = target[[USER_COL, ITEM_COL, RATING_COL]].drop_duplicates(
         [USER_COL, ITEM_COL]
     )

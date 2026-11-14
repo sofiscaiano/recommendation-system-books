@@ -1,5 +1,3 @@
-"""Registro de métricas sin correr el pipeline completo."""
-
 from dataclasses import dataclass
 
 import mlflow
@@ -12,9 +10,11 @@ from quelibroleo.tracking import log_evaluation, track_command
 def test_track_command_requires_note() -> None:
     import pytest
 
-    with pytest.raises(ValueError, match="descripción"):
-        with track_command("evaluate", PipelineConfig(), tune=False):
-            pass
+    with (
+        pytest.raises(ValueError, match="descripción"),
+        track_command("evaluate", PipelineConfig(), tune=False),
+    ):
+        pass
 
 
 def test_track_command_logs_holdout_metrics(tmp_path, monkeypatch) -> None:
@@ -160,14 +160,18 @@ def test_archive_submission_keeps_each_copy(tmp_path, monkeypatch) -> None:
     assert manifest["note"] == "primera entrega"
     assert manifest["seed"] == 42
     assert manifest["csv_sha256"]
-    sidecar = json.loads((tmp_path / "submission.csv.run.json").read_text(encoding="utf-8"))
+    sidecar = json.loads(
+        (tmp_path / "submission.csv.run.json").read_text(encoding="utf-8")
+    )
     assert sidecar["run_name"] == second
     assert sidecar["hyperparameters_origin"] == "default"
     stored = mlflow.tracking.MlflowClient().get_run(first_id)
     assert stored.data.tags["hyperparameters_run_name"] == "20260923-evaluate-tune-abcd"
     names = [
         item.path
-        for item in mlflow.tracking.MlflowClient().list_artifacts(first_id, f"submissions/{first}")
+        for item in mlflow.tracking.MlflowClient().list_artifacts(
+            first_id, f"submissions/{first}"
+        )
     ]
     assert f"submissions/{first}/submission.csv" in names
     assert f"submissions/{first}/manifest.json" in names
@@ -246,7 +250,9 @@ def test_saved_hyperparameters_are_per_model(tmp_path, monkeypatch) -> None:
     ease_file.write_text("{}\n", encoding="utf-8")
     with track_command(
         "evaluate",
-        PipelineConfig(model="ease", run_note="ease con su archivo", artifacts_dir=artifacts),
+        PipelineConfig(
+            model="ease", run_note="ease con su archivo", artifacts_dir=artifacts
+        ),
         tune=False,
     ):
         ease_tuned = mlflow.active_run().info.run_name

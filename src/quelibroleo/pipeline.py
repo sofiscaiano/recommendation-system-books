@@ -1,5 +1,3 @@
-"""Orquestación end-to-end del recomendador en dos etapas."""
-
 from __future__ import annotations
 
 import json
@@ -59,12 +57,6 @@ _TWO_STAGE_DIAGNOSTICS = (
 
 
 def clear_foreign_diagnostics(artifacts: Path, model: str) -> None:
-    """Quita diagnósticos de two_stage cuando corre otro modelo.
-
-    No borra ``tuned_hyperparameters.json`` ni ``tuning_history.json``:
-    two_stage vuelve a buscar ahí un tuneo de la misma config.
-    """
-
     if model == "two_stage":
         return
     directory = Path(artifacts)
@@ -76,8 +68,6 @@ def clear_foreign_diagnostics(artifacts: Path, model: str) -> None:
 
 @dataclass(frozen=True)
 class FoldMaterial:
-    """Artefactos previos a la fusión para un fold."""
-
     fold: int
     train: pd.DataFrame
     target: pd.DataFrame
@@ -88,8 +78,6 @@ class FoldMaterial:
 
 @dataclass(frozen=True)
 class EvaluationReport:
-    """Métricas del hold-out que se comparan entre corridas."""
-
     submit_ndcg_at_20: float
     submit_baseline_ndcg_at_20: float
     submit_users: int
@@ -103,8 +91,6 @@ class EvaluationReport:
 
 @dataclass
 class TrainedPipeline:
-    """Componentes necesarios para puntuar un fold o el catálogo final."""
-
     ranker: LambdaRanker
     weights: dict[str, float]
     rrf_cutoff: int
@@ -124,8 +110,6 @@ def _collect_material(
     per_source: int,
     readers: pd.DataFrame | None = None,
 ) -> FoldMaterial:
-    """Entrena las fuentes y el builder de un fold, sin fusionar todavía."""
-
     LOGGER.info(
         "Entrenando retrievers del fold %s para %s usuarios",
         fold,
@@ -151,8 +135,6 @@ def _collect_material(
 
 
 def _active_source_names(config: PipelineConfig) -> tuple[str, ...]:
-    """Nombres de las fuentes que esta corrida entrena."""
-
     return config.retrieval.enabled_sources()
 
 
@@ -160,8 +142,6 @@ def _weights_for_active_sources(
     weights: dict[str, float],
     config: PipelineConfig,
 ) -> dict[str, float]:
-    """Descarta pesos de fuentes que el pipeline ya no entrena."""
-
     active = set(_active_source_names(config))
     missing = sorted(active - set(weights))
     if missing:
@@ -186,8 +166,6 @@ def _material_to_features(
     fusion: CandidateFusion,
     cutoff: int,
 ) -> tuple[RankerTable, FusionResult]:
-    """Fusiona candidatos, arma features y les pone la relevancia del target."""
-
     fused = fusion.fuse(material.source_candidates, cutoff)
     features = material.feature_builder.transform(
         fused.candidates,
@@ -202,12 +180,12 @@ def _material_to_features(
 
 
 def _concat_feature_sets(sets: list[RankerTable]) -> RankerTable:
-    """Apila folds y rellena con NaN las columnas que faltan en alguno."""
-
     if not sets:
         raise ValueError("No hay folds de features para concatenar")
     feature_columns = tuple(
-        sorted({column for feature_set in sets for column in feature_set.feature_columns})
+        sorted(
+            {column for feature_set in sets for column in feature_set.feature_columns}
+        )
     )
     frames = []
     for feature_set in sets:
@@ -231,8 +209,6 @@ def train_ranker_from_history(
     tune: bool = False,
     execute_ablations: bool = True,
 ) -> TrainedPipeline:
-    """Entrena LambdaRank exclusivamente con pseudo-futuros rolling."""
-
     if tune:
         saved = None
         hyperparameters_origin = "tune"
@@ -321,9 +297,7 @@ def train_ranker_from_history(
         source_ablation_rows = []
         validation_sources = materials[-1].source_candidates
         for source in sorted(validation_sources["source"].unique()):
-            without_source = validation_sources[
-                validation_sources["source"] != source
-            ]
+            without_source = validation_sources[validation_sources["source"] != source]
             ablated_candidates = fusion.fuse(without_source, cutoff).candidates
             metrics = retrieval_metrics(
                 ablated_candidates,
@@ -393,8 +367,6 @@ def _score_history(
     config: PipelineConfig,
     readers: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, FusionResult, RankerTable]:
-    """Recupera, fusiona y rankea un historial con el modelo ya entrenado."""
-
     material = _collect_material(
         train,
         target=train.iloc[0:0].copy(),
@@ -428,8 +400,6 @@ def evaluate(
     tune: bool = False,
     save_artifacts: bool = True,
 ) -> tuple[EvaluationReport, TrainedPipeline | None]:
-    """Evalúa una sola vez sobre el leave-last-20 exterior."""
-
     from .tracking import log_evaluation, log_summary_artifacts, track_command
 
     config = config or PipelineConfig()
@@ -447,8 +417,6 @@ def _evaluate(
     tune: bool,
     save_artifacts: bool,
 ) -> tuple[EvaluationReport, TrainedPipeline | None]:
-    """Corre el modelo sobre el hold-out y, si corresponde, escribe artifacts/."""
-
     from .models import build_model
 
     split = load_split(config, holdout=True)
@@ -534,8 +502,6 @@ def _evaluate(
 
 
 def _write_retrieval_hits(artifacts: Path, model: object, split: SplitData) -> None:
-    """Guarda, por libro de test, si el retrieval lo trajo. Borra el archivo viejo si no aplica."""
-
     path = artifacts / "evaluation_retrieval_hits.csv"
     fused = getattr(model, "fused", None)
     if fused is None:
@@ -546,8 +512,6 @@ def _write_retrieval_hits(artifacts: Path, model: object, split: SplitData) -> N
 
 
 def _retrieval_of(model: object, split: SplitData) -> tuple[float, float, int]:
-    """Recall, NDCG oracle y corte de candidatos. Ceros si el modelo no recupera."""
-
     fused = getattr(model, "fused", None)
     trained = getattr(model, "trained", None)
     if fused is None or not isinstance(trained, TrainedPipeline):
@@ -557,8 +521,6 @@ def _retrieval_of(model: object, split: SplitData) -> tuple[float, float, int]:
 
 
 def _mean_for(values: pd.Series, users: set[str]) -> tuple[float, int]:
-    """Media del NDCG en un subconjunto de lectores, y cuántos entraron."""
-
     selected = values[values.index.astype(str).isin(users)]
     if selected.empty:
         return 0.0, 0
@@ -566,8 +528,6 @@ def _mean_for(values: pd.Series, users: set[str]) -> tuple[float, int]:
 
 
 def _stamp_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    """Agrega la corrida activa como columna, sin tocar el frame original."""
-
     from .tracking import active_run_name
 
     run_name = active_run_name()
@@ -584,8 +544,6 @@ def train_final_and_submit(
     tune: bool = False,
     output_path: str | Path | None = None,
 ) -> pd.DataFrame:
-    """Reentrena con toda la historia válida y genera la entrega."""
-
     from .tracking import log_summary_artifacts, track_command
 
     config = config or PipelineConfig()
@@ -601,8 +559,6 @@ def _submit(
     tune: bool,
     output_path: str | Path | None,
 ) -> pd.DataFrame:
-    """Reentrena con toda la historia y escribe el CSV de entrega."""
-
     from .models import build_model
 
     split = load_split(config, holdout=False)
@@ -629,7 +585,9 @@ def _submit(
         origin = getattr(model, "hyperparameters_origin", "default")
         tuned_run = getattr(model, "hyperparameters_run_name", "")
         recorded = getattr(model, "hyperparameters", None)
-        hyperparameters = recorded if isinstance(recorded, dict) else {"model": model.name}
+        hyperparameters = (
+            recorded if isinstance(recorded, dict) else {"model": model.name}
+        )
     from .tracking import archive_submission, write_run_marker
 
     destination = Path(output_path or config.output_path)
@@ -655,8 +613,6 @@ def _submit(
 
 
 class TwoStage:
-    """Retrieval + LambdaRank. La validación es el último fold rolling."""
-
     name = "two_stage"
 
     def __init__(self, config: PipelineConfig) -> None:
@@ -666,8 +622,6 @@ class TwoStage:
         self._split: SplitData | None = None
 
     def fit(self, split: SplitData, *, tune: bool = False) -> None:
-        """Entrena retrieval y LambdaRank. Las ablaciones solo corren en evaluate."""
-
         self._split = split
         self.trained = train_ranker_from_history(
             split.history,
@@ -679,8 +633,6 @@ class TwoStage:
         )
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
-        """Rankea a esos lectores y guarda los candidatos fusionados."""
-
         if self.trained is None or self._split is None:
             raise RuntimeError("El modelo debe entrenarse antes de recomendar")
         recommendations, fused, _ = _score_history(
@@ -696,8 +648,6 @@ class TwoStage:
 
 
 def _hyperparameters_snapshot(trained: TrainedPipeline) -> dict[str, Any]:
-    """Pesos, corte y parámetros de LambdaRank que produjo esta corrida."""
-
     ranker_values = asdict(trained.ranker.config)
     ranker_values.pop("search", None)
     ranker_values.update(trained.ranker.overrides)
@@ -714,20 +664,22 @@ def run_ablations(
     validation_truth: pd.DataFrame,
     config: PipelineConfig,
 ) -> pd.DataFrame:
-    """Compara familias de features manteniendo fijo el conjunto candidato."""
-
     groups = {
-        "without_retrieval": lambda column: not column.startswith(
-            ("score_", "rank_", "present_", "reciprocal_", "rrf_", "retrieval_")
+        "without_retrieval": lambda column: (
+            not column.startswith(
+                ("score_", "rank_", "present_", "reciprocal_", "rrf_", "retrieval_")
+            )
         ),
-        "without_sequence": lambda column: not any(
-            token in column
-            for token in (
-                "recent_",
-                "transition_",
-                "same_last_",
-                "publication_age",
-                "edition_vs_user_mean_year",
+        "without_sequence": lambda column: (
+            not any(
+                token in column
+                for token in (
+                    "recent_",
+                    "transition_",
+                    "same_last_",
+                    "publication_age",
+                    "edition_vs_user_mean_year",
+                )
             )
         ),
     }

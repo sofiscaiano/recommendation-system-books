@@ -1,5 +1,3 @@
-"""Cada fuente se tunea sola y no pisa el JSON de otra ni el de two_stage."""
-
 from __future__ import annotations
 
 import json
@@ -73,7 +71,12 @@ def _history() -> pd.DataFrame:
     for user, start in (("u1", 0), ("u2", 2), ("u3", 4)):
         for offset in range(10):
             rows.append(
-                (user, f"b{start + offset}", f"2020-01-{offset + 1:02d}", 6 + offset % 4)
+                (
+                    user,
+                    f"b{start + offset}",
+                    f"2020-01-{offset + 1:02d}",
+                    6 + offset % 4,
+                )
             )
     return _frame(rows)
 
@@ -148,7 +151,9 @@ def test_tune_writes_only_that_source_file(tmp_path, model: str) -> None:
     fitted = build_model(model, _config(tmp_path, model))
     fitted.fit(_split(frame), tune=True)
 
-    saved = json.loads((tmp_path / f"{model}_hyperparameters.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / f"{model}_hyperparameters.json").read_text(encoding="utf-8")
+    )
     assert two_stage.read_text(encoding="utf-8") == "{}\n"
     assert other.read_text(encoding="utf-8") == "{}\n"
     assert saved
@@ -204,7 +209,9 @@ def test_invalid_two_tower_file_is_rejected(tmp_path) -> None:
         load_two_tower_hyperparameters(path)
 
 
-def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path, monkeypatch) -> None:
+def test_two_tower_tune_writes_its_file_and_keeps_two_stage(
+    tmp_path, monkeypatch
+) -> None:
     rows = [
         (
             f"u{user}",
@@ -250,7 +257,9 @@ def test_two_tower_tune_writes_its_file_and_keeps_two_stage(tmp_path, monkeypatc
     monkeypatch.setattr(two_tower_module, "train", counted)
     model.fit(_split(frame), tune=True)
 
-    saved = json.loads((tmp_path / "two_tower_hyperparameters.json").read_text(encoding="utf-8"))
+    saved = json.loads(
+        (tmp_path / "two_tower_hyperparameters.json").read_text(encoding="utf-8")
+    )
     assert two_stage.read_text(encoding="utf-8") == "{}\n"
     assert 4 <= saved["embedding_dim"] <= 8
     assert saved["min_item_reads"] in {1, 2}

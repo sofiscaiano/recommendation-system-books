@@ -1,5 +1,3 @@
-"""Ranking final con LightGBM LambdaRank."""
-
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -19,16 +17,12 @@ LABEL_GAINS: dict[str, tuple[int, ...]] = {
 
 
 def label_gain_values(mode: str) -> list[int]:
-    """Ganancia por rating. `exponential` coincide con el NDCG de evaluación."""
-
     if mode not in LABEL_GAIN_MODES:
         raise ValueError("label_gain debe ser 'linear' o 'exponential'")
     return list(LABEL_GAINS[mode])
 
 
 def _ordered_groups(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[int]]:
-    """Ordena por query y devuelve el tamaño de cada grupo para LightGBM."""
-
     if "query_id" not in frame:
         raise ValueError("Falta query_id en el conjunto de ranking")
     ordered = frame.sort_values(
@@ -39,8 +33,6 @@ def _ordered_groups(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[int]]:
 
 
 class LambdaRanker:
-    """Wrapper reproducible de ``LGBMRanker``."""
-
     def __init__(
         self,
         config: RankerConfig | None = None,
@@ -56,8 +48,6 @@ class LambdaRanker:
         self.best_iteration_: int | None = None
 
     def _parameters(self) -> dict[str, Any]:
-        """Parámetros de LGBMRanker, con la ganancia de etiqueta ya resuelta."""
-
         values = asdict(self.config)
         values.pop("early_stopping_rounds")
         values.pop("search")
@@ -79,8 +69,6 @@ class LambdaRanker:
         train: RankerTable,
         validation: RankerTable | None = None,
     ) -> LambdaRanker:
-        """Entrena por grupo. Si hay validación, corta con early stopping."""
-
         if "relevance" not in train.frame:
             raise ValueError("El train no contiene relevance")
         feature_columns = tuple(
@@ -121,8 +109,6 @@ class LambdaRanker:
         return self
 
     def predict(self, features: RankerTable) -> pd.DataFrame:
-        """Puntúa y ordena por score descendente, con desempate por id_libro."""
-
         if self.model_ is None:
             raise RuntimeError("El ranker debe entrenarse antes de predecir")
         missing = set(self.feature_columns_) - set(features.frame)
@@ -142,8 +128,6 @@ class LambdaRanker:
         return result.reset_index(drop=True)
 
     def feature_importance(self) -> pd.DataFrame:
-        """Importancia por ganancia del booster ya entrenado."""
-
         if self.model_ is None:
             raise RuntimeError("El ranker todavía no fue entrenado")
         return pd.DataFrame(

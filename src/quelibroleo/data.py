@@ -1,5 +1,3 @@
-"""Carga y validación de los datos de Qué Libro Leo."""
-
 from __future__ import annotations
 
 import sqlite3
@@ -15,12 +13,6 @@ RATING_COL = "rating"
 
 
 def object_ids(values: pd.Series) -> pd.Series:
-    """Ids como ``object``.
-
-    ``isin`` de ``string[pyarrow]`` contra un diccionario grande tarda más de
-    100 ms aunque la serie tenga una sola fila.
-    """
-
     if values.dtype == object:
         return values
     return values.astype(object)
@@ -28,8 +20,6 @@ def object_ids(values: pd.Series) -> pd.Series:
 
 @dataclass(frozen=True)
 class DataQualityReport:
-    """Resumen de anomalías detectadas durante la carga."""
-
     interaction_count: int
     valid_interaction_count: int
     invalid_date_count: int
@@ -42,8 +32,6 @@ class DataQualityReport:
 
 @dataclass(frozen=True)
 class DatasetBundle:
-    """Tablas normalizadas y reporte de calidad."""
-
     interactions: pd.DataFrame
     invalid_interactions: pd.DataFrame
     books: pd.DataFrame
@@ -52,8 +40,6 @@ class DatasetBundle:
 
     @property
     def modeled_interactions(self) -> pd.DataFrame:
-        """Interacciones con fecha válida y libro presente en catálogo."""
-
         valid_items = set(self.books[ITEM_COL])
         return self.interactions[
             self.interactions[ITEM_COL].isin(valid_items)
@@ -61,8 +47,6 @@ class DatasetBundle:
 
 
 def _read_sqlite(path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Lee las tres tablas en solo lectura."""
-
     if not path.exists():
         raise FileNotFoundError(f"No existe la base SQLite: {path}")
 
@@ -81,14 +65,6 @@ def _read_sqlite(path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def load_dataset(path: str | Path = "data.db") -> DatasetBundle:
-    """Carga ``data.db`` en modo de solo lectura y valida sus claves.
-
-    La fila con fecha inválida queda separada y nunca participa en splits
-    temporales. Las interacciones huérfanas se conservan en ``interactions``
-    para poder auditarlas; ``modeled_interactions`` excluye libros que no
-    existen en el catálogo.
-    """
-
     db_path = Path(path)
     raw, books, readers = _read_sqlite(db_path)
 
@@ -118,25 +94,19 @@ def load_dataset(path: str | Path = "data.db") -> DatasetBundle:
         valid_interaction_count=len(interactions),
         invalid_date_count=int(invalid_mask.sum()),
         orphan_user_count=len(orphan_users),
-        orphan_user_interactions=int(
-            interactions[USER_COL].isin(orphan_users).sum()
-        ),
+        orphan_user_interactions=int(interactions[USER_COL].isin(orphan_users).sum()),
         orphan_item_count=len(orphan_items),
-        orphan_item_interactions=int(
-            interactions[ITEM_COL].isin(orphan_items).sum()
-        ),
+        orphan_item_interactions=int(interactions[ITEM_COL].isin(orphan_items).sum()),
         catalog_items_without_interactions=len(catalog_items - interaction_items),
     )
 
     books = books.copy()
     for column in ("titulo", "autor", "genero", "editorial", "resumen"):
         books[column] = books[column].fillna("").astype(str).str.strip()
-    books["anio_edicion_num"] = pd.to_numeric(
-        books["anio_edicion"], errors="coerce"
+    books["anio_edicion_num"] = pd.to_numeric(books["anio_edicion"], errors="coerce")
+    books.loc[~books["anio_edicion_num"].between(1000, 2100), "anio_edicion_num"] = (
+        pd.NA
     )
-    books.loc[
-        ~books["anio_edicion_num"].between(1000, 2100), "anio_edicion_num"
-    ] = pd.NA
 
     return DatasetBundle(
         interactions=interactions.reset_index(drop=True),
@@ -151,7 +121,5 @@ def observed_catalog(
     interactions: pd.DataFrame,
     books: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Restringe el catálogo a libros observados en el train indicado."""
-
     observed = interactions[[ITEM_COL]].drop_duplicates()
     return observed.merge(books, on=ITEM_COL, how="inner", validate="one_to_one")

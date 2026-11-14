@@ -17,8 +17,7 @@ def interactions(users: int = 3, rows: int = 50) -> pd.DataFrame:
                 {
                     "id_lector": f"u{user}",
                     "id_libro": f"b{index:03d}",
-                    "fecha": pd.Timestamp("2020-01-01")
-                    + pd.Timedelta(days=index // 2),
+                    "fecha": pd.Timestamp("2020-01-01") + pd.Timedelta(days=index // 2),
                     "rating": index % 10 + 1,
                 }
             )

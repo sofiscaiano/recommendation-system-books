@@ -1,8 +1,3 @@
-"""Train, validación y test que comparten todos los modelos.
-
-MLflow no está acá. El registro de corridas vive en ``tracking.py``.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,14 +11,6 @@ from .splits import RollingFold, leave_last_k, rolling_origin_folds
 
 @dataclass(frozen=True)
 class SplitData:
-    """Datos ya cortados. Ningún modelo arma su propio corte.
-
-    En evaluación, ``history`` es todo lo anterior a las últimas 20
-    interacciones y ``test`` son esas 20. ``validation_folds`` parte
-    ``history`` en los mismos tres cortes: el último es la validación.
-    En la entrega, ``history`` es el historial completo y ``test`` está vacío.
-    """
-
     holdout: bool
     books: pd.DataFrame
     readers: pd.DataFrame
@@ -36,8 +23,6 @@ class SplitData:
 
 
 def load_split(config: PipelineConfig, *, holdout: bool) -> SplitData:
-    """Carga ``data.db`` y aplica el único corte de train, validación y test."""
-
     bundle = load_dataset(config.db_path)
     if holdout:
         outer = leave_last_k(bundle.interactions, k=config.split.holdout_k)
@@ -59,9 +44,9 @@ def load_split(config: PipelineConfig, *, holdout: bool) -> SplitData:
     )
 
 
-def validation_folds(history: pd.DataFrame, config: PipelineConfig) -> list[RollingFold]:
-    """Folds rolling dentro del train. El último es la validación."""
-
+def validation_folds(
+    history: pd.DataFrame, config: PipelineConfig
+) -> list[RollingFold]:
     return rolling_origin_folds(
         history,
         n_folds=config.split.rolling_folds,
@@ -71,8 +56,6 @@ def validation_folds(history: pd.DataFrame, config: PipelineConfig) -> list[Roll
 
 
 def seen_books(split: SplitData) -> pd.DataFrame:
-    """Libros que no se pueden volver a recomendar, fechas inválidas incluidas."""
-
     return pd.concat(
         [split.history, split.invalid_interactions],
         ignore_index=True,
@@ -81,13 +64,9 @@ def seen_books(split: SplitData) -> pd.DataFrame:
 
 
 def example_users(config: PipelineConfig) -> set[str]:
-    """Lectores de ``ejemplo.csv``. El tuning opcional puntúa solo a estos."""
-
     return set(_submit_users(config))
 
 
 def _submit_users(config: PipelineConfig) -> list[str]:
-    """Lectores de ``ejemplo.csv``, en ese orden y sin duplicar."""
-
     example = pd.read_csv(config.example_path, dtype=str)
     return list(dict.fromkeys(example[USER_COL].astype(str)))

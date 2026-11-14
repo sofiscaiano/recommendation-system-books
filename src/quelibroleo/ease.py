@@ -1,19 +1,3 @@
-"""EASE: matriz ítem-ítem de Steck (WWW 2019).
-
-Con la matriz de interacciones X (lectores × libros) se aprende B tal que
-la predicción es X B, la diagonal de B es cero y el ajuste es error
-cuadrático más una penalización L2.
-
-X guarda el rating. Una lectura que no está vale 0. Al puntuar, el perfil
-del lector es ese rating por la recencia: la similitud entre libros no
-depende de cuándo se leyeron, y el ranking sí. Meter la recencia en X
-cambiaría el número a reconstruir, no el peso del error.
-
-`EaseModel` es el recomendador de una etapa. `EaseRetriever`, en
-`two_stage/retrieval.py`, usa la misma matriz como fuente de `two_stage`
-y no rellena con popularidad: esa lista ya es otra fuente.
-"""
-
 from __future__ import annotations
 
 import json
@@ -35,16 +19,13 @@ from .split_data import SplitData, example_users, validation_folds
 LOGGER = logging.getLogger(__name__)
 EASE_HYPERPARAMETERS_FILE = "ease_hyperparameters.json"
 TOP_K = 20
-# Con 5 lecturas el catálogo pasa de ~12.000 libros y la Gram densa deja de
-# entrar cómoda en memoria. La búsqueda no baja de 10.
+
 MAX_ITEMS = 12_000
 _SCORE_BATCH = 512
 
 
 @dataclass(frozen=True)
 class EaseParameters:
-    """λ y el mínimo de lecturas. El perfil de consulta no se busca."""
-
     reg_lambda: float
     min_interactions: int
     run_name: str = ""
@@ -52,28 +33,20 @@ class EaseParameters:
 
 @dataclass(frozen=True)
 class EaseSpectrum:
-    """Autovalores de XᵀX. Alcanza para puntuar cualquier λ sin rearma B."""
-
     item_ids: np.ndarray
     eigenvalues: np.ndarray
     eigenvectors: np.ndarray
 
 
 def ease_hyperparameters_path(artifacts_dir: Path) -> Path:
-    """Ruta del tuneo de EASE. No es el JSON de two_stage."""
-
     return Path(artifacts_dir) / EASE_HYPERPARAMETERS_FILE
 
 
 def has_saved_ease_hyperparameters(artifacts_dir: Path) -> bool:
-    """Indica si hay un tuneo de EASE para reutilizar."""
-
     return ease_hyperparameters_path(artifacts_dir).is_file()
 
 
 def load_ease_hyperparameters(path: Path) -> EaseParameters:
-    """Lee el JSON de EASE. Falla si el archivo existe pero no es válido."""
-
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
@@ -101,8 +74,6 @@ def load_ease_hyperparameters(path: Path) -> EaseParameters:
 
 
 def parameters_from_config(config: EaseConfig) -> EaseParameters:
-    """Valores fijos, los de una corrida sin archivo guardado."""
-
     return EaseParameters(
         reg_lambda=float(config.reg_lambda),
         min_interactions=int(config.min_interactions),
@@ -110,12 +81,6 @@ def parameters_from_config(config: EaseConfig) -> EaseParameters:
 
 
 def ease_source_parameters(config: PipelineConfig) -> EaseParameters:
-    """Parámetros de la matriz, como modelo único o como fuente de two_stage.
-
-    El JSON de un `--model ease --tune` gana. Si no está, valen los de
-    `EaseConfig`. two_stage no vuelve a buscar λ ni el mínimo: solo elige el peso.
-    """
-
     path = ease_hyperparameters_path(config.artifacts_dir)
     if path.is_file():
         return load_ease_hyperparameters(path)
@@ -123,8 +88,6 @@ def ease_source_parameters(config: PipelineConfig) -> EaseParameters:
 
 
 def resolve_ease_parameters(config: PipelineConfig) -> tuple[EaseParameters, str]:
-    """Devuelve el tuneo de EASE, o los valores fijos si ese archivo no existe."""
-
     path = ease_hyperparameters_path(config.artifacts_dir)
     parameters = ease_source_parameters(config)
     if path.is_file():
@@ -141,8 +104,6 @@ def resolve_ease_parameters(config: PipelineConfig) -> tuple[EaseParameters, str
 
 
 def _profile_weights(frame: pd.DataFrame, half_life_days: float) -> np.ndarray:
-    """Rating por recencia. La edad se mide contra la última lectura del lector."""
-
     rating = frame[RATING_COL].to_numpy(dtype=np.float64)
     if half_life_days <= 0 or len(frame) == 0:
         return rating
@@ -156,8 +117,6 @@ def interaction_matrix(
     *,
     min_interactions: int,
 ) -> tuple[sparse.csr_matrix, np.ndarray]:
-    """Matriz lectores × libros frecuentes. Cada celda es el rating, sin recencia."""
-
     counts = frame.groupby(ITEM_COL, sort=False).size()
     item_ids = np.array(
         sorted(counts[counts >= min_interactions].index.astype(str)),
@@ -197,8 +156,6 @@ def spectrum_from_matrix(
     matrix: sparse.csr_matrix,
     item_ids: np.ndarray,
 ) -> EaseSpectrum:
-    """Diagonaliza XᵀX. λ se aplica después, así varios trials comparten esto."""
-
     if matrix.shape[1] == 0:
         return EaseSpectrum(
             item_ids=item_ids,
@@ -216,9 +173,9 @@ def spectrum_from_matrix(
     )
 
 
-def score_users(matrix: sparse.csr_matrix, spectrum: EaseSpectrum, reg_lambda: float) -> np.ndarray:
-    """Puntúa filas de X. s = x − (x P) / diag(P), con P = (XᵀX + λI)⁻¹."""
-
+def score_users(
+    matrix: sparse.csr_matrix, spectrum: EaseSpectrum, reg_lambda: float
+) -> np.ndarray:
     n_users, n_items = matrix.shape
     if n_items == 0 or n_users == 0:
         return np.zeros((n_users, n_items), dtype=np.float64)
@@ -238,8 +195,6 @@ def _matrix_for_users(
     *,
     half_life_days: float,
 ) -> sparse.csr_matrix:
-    """Una fila por lector, en ese orden. El peso es rating por recencia."""
-
     item_index = {item: index for index, item in enumerate(item_ids)}
     if not item_index:
         return sparse.csr_matrix((len(users), 0), dtype=np.float64)
@@ -251,7 +206,10 @@ def _matrix_for_users(
     return sparse.csr_matrix(
         (
             weights[mask.to_numpy()],
-            (rows[mask].to_numpy(dtype=np.int64), columns[mask].to_numpy(dtype=np.int64)),
+            (
+                rows[mask].to_numpy(dtype=np.int64),
+                columns[mask].to_numpy(dtype=np.int64),
+            ),
         ),
         shape=(len(users), len(item_ids)),
         dtype=np.float64,
@@ -264,8 +222,6 @@ def _top_unseen(
     seen: set[str],
     n: int,
 ) -> list[tuple[str, float]]:
-    """Top-n con desempate por id_libro. Los ya leídos quedan afuera."""
-
     if n <= 0 or len(item_ids) == 0:
         return []
     ranked_scores = scores.copy()
@@ -284,8 +240,6 @@ def _top_unseen(
 
 
 class _SpectrumCache:
-    """Guarda la última diagonalización. λ no la invalida; el peso y el corte sí."""
-
     def __init__(self) -> None:
         self._key: tuple[Any, ...] | None = None
         self.spectrum: EaseSpectrum | None = None
@@ -323,8 +277,6 @@ def ease_ranking(
     half_life_days: float,
     n: int,
 ) -> pd.DataFrame:
-    """Top-n de la matriz, sin popularidad y sin lectores que no aportan peso."""
-
     columns = [USER_COL, ITEM_COL, "score", "rank"]
     if not users or n <= 0 or len(spectrum.item_ids) == 0:
         return pd.DataFrame(columns=columns)
@@ -380,8 +332,6 @@ def _recommend_frame(
     half_life_days: float,
     n: int,
 ) -> pd.DataFrame:
-    """Top-n de EASE y, si no alcanza, popularidad sin repetir ni recomendar leídos."""
-
     columns = [USER_COL, ITEM_COL, "score", "rank"]
     if not users:
         return pd.DataFrame(columns=columns)
@@ -437,8 +387,6 @@ def _study_population(
     query_users: tuple[str, ...],
     target: pd.DataFrame,
 ) -> tuple[list[str], pd.DataFrame]:
-    """Lectores del objetivo. Con el flag, solo los de ejemplo.csv."""
-
     users = [str(user) for user in query_users]
     if not config.tune_on_example_users:
         return users, target
@@ -449,7 +397,9 @@ def _study_population(
             "Ningún lector de ejemplo.csv entra al último fold; "
             "no se puede tunear solo sobre la entrega."
         )
-    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(drop=True)
+    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(
+        drop=True
+    )
     LOGGER.info(
         "El study puntúa el último fold en %s lectores de %s",
         len(present),
@@ -459,8 +409,6 @@ def _study_population(
 
 
 def _in_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
-    """Deja solo libros del catálogo. El corte temporal no los saca."""
-
     catalog = set(books[ITEM_COL].astype(str))
     kept = frame[frame[ITEM_COL].astype(str).isin(catalog)].copy()
     kept[USER_COL] = kept[USER_COL].astype(str)
@@ -473,12 +421,6 @@ def tune_ease(
     books: pd.DataFrame,
     config: PipelineConfig,
 ) -> EaseParameters:
-    """Elige λ y el mínimo de lecturas maximizando el NDCG@20 del último fold.
-
-    Con ``tune_on_example_users`` ese NDCG mira solo los lectores de
-    ``ejemplo.csv``, igual que el resto de los studies.
-    """
-
     try:
         import optuna
     except ImportError as exc:
@@ -498,10 +440,10 @@ def tune_ease(
     search = config.ease.search
 
     def objective(trial: Any) -> float:
-        """NDCG@20 del último fold. La diagonalización se reusa si solo cambia λ."""
-
         reg_lambda = float(search.reg_lambda.suggest(trial, "reg_lambda"))
-        min_interactions = int(search.min_interactions.suggest(trial, "min_interactions"))
+        min_interactions = int(
+            search.min_interactions.suggest(trial, "min_interactions")
+        )
         spectrum = cache.get(train, min_interactions=min_interactions)
         parameters = EaseParameters(reg_lambda, min_interactions)
         popularity = PopularityRecommender().fit(
@@ -559,9 +501,9 @@ def tune_ease(
     )
 
 
-def _write_ease_hyperparameters(config: PipelineConfig, parameters: EaseParameters) -> None:
-    """Guarda el study de EASE sin tocar el JSON de two_stage."""
-
+def _write_ease_hyperparameters(
+    config: PipelineConfig, parameters: EaseParameters
+) -> None:
     path = ease_hyperparameters_path(config.artifacts_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     from .tracking import with_run_name
@@ -584,8 +526,6 @@ def _write_ease_hyperparameters(config: PipelineConfig, parameters: EaseParamete
 
 
 def _log_selected(parameters: EaseParameters, n_items: int, origin: str) -> None:
-    """Deja en la corrida activa qué EASE se usó, aparte de los valores de búsqueda."""
-
     import mlflow
 
     if mlflow.active_run() is None:
@@ -602,8 +542,6 @@ def _log_selected(parameters: EaseParameters, n_items: int, origin: str) -> None
 
 
 class EaseModel:
-    """Recomendador de una etapa. `fit` y `recommend` no pasan por two_stage."""
-
     name = "ease"
 
     def __init__(self, config: PipelineConfig) -> None:
@@ -617,8 +555,6 @@ class EaseModel:
         self._popularity: PopularityRecommender | None = None
 
     def fit(self, split: SplitData, *, tune: bool = False) -> None:
-        """Ajusta B con `split.history`. El último fold solo entra si `tune` es verdadero."""
-
         raw = split.history.copy()
         raw[USER_COL] = raw[USER_COL].astype(str)
         raw[ITEM_COL] = raw[ITEM_COL].astype(str)
@@ -630,7 +566,9 @@ class EaseModel:
         else:
             parameters, origin = resolve_ease_parameters(self.config)
             self.hyperparameters_origin = origin
-            self.hyperparameters_run_name = parameters.run_name if origin == "saved" else ""
+            self.hyperparameters_run_name = (
+                parameters.run_name if origin == "saved" else ""
+            )
         history = _in_catalog(raw, split.books)
         matrix, item_ids = interaction_matrix(
             history,
@@ -658,8 +596,6 @@ class EaseModel:
         _log_selected(parameters, len(item_ids), self.hyperparameters_origin)
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
-        """Top-20, sin libros ya leídos. Popularidad completa si EASE no llega."""
-
         if (
             self._history is None
             or self._spectrum is None

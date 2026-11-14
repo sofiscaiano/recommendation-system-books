@@ -1,5 +1,3 @@
-"""CLI del recomendador en dos etapas."""
-
 from __future__ import annotations
 
 import json
@@ -13,7 +11,6 @@ import typer
 from quelibroleo.config import PipelineConfig
 from quelibroleo.pipeline import evaluate as evaluate_pipeline
 from quelibroleo.pipeline import train_final_and_submit
-from quelibroleo.serving import export_serving_artifact
 
 app = typer.Typer(
     help="Recomendador de Qué Libro Leo. --model elige two_stage, popularity o una fuente",
@@ -110,8 +107,6 @@ ModelOption = Annotated[
 
 
 def _configure_logging(artifacts: Path) -> None:
-    """Log a consola y a ``artifacts/run.log``."""
-
     artifacts.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
@@ -137,8 +132,6 @@ def _config(
     ease_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> PipelineConfig:
-    """Arma la config de la corrida con las rutas, la nota y el modelo."""
-
     base = PipelineConfig()
     retrieval = base.retrieval
     if two_tower_source is not None:
@@ -183,8 +176,6 @@ def _run(
     ease_source: bool | None = None,
     tune_on_example_users: bool | None = None,
 ) -> None:
-    """Ejecuta evaluate, submit o ambos con la misma configuración."""
-
     if not note.strip():
         raise typer.BadParameter("La corrida exige --note con una descripción.")
     _configure_logging(artifacts)
@@ -239,8 +230,6 @@ def main(
     label_gain: LabelGainOption = None,
     model: ModelOption = None,
 ) -> None:
-    """Sin subcomando, evalúa. two_stage reutiliza el último tuneo."""
-
     if ctx.invoked_subcommand is None:
         _run(
             "evaluate",
@@ -271,8 +260,6 @@ def evaluate(
     ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
-    """Evalúa el leave-last-20 y escribe artifacts/."""
-
     _run(
         "evaluate",
         db=db,
@@ -305,8 +292,6 @@ def submit(
     ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
-    """Reentrena con toda la historia y escribe submission.csv."""
-
     _run(
         "submit",
         db=db,
@@ -339,8 +324,6 @@ def run_all(
     ease_source: EaseSourceOption = None,
     tune_on_example_users: TuneOnExampleUsersOption = None,
 ) -> None:
-    """Evalúa y después genera la entrega."""
-
     _run(
         "all",
         db=db,
@@ -356,26 +339,6 @@ def run_all(
         ease_source=ease_source,
         tune_on_example_users=tune_on_example_users,
     )
-
-
-@app.command(name="export-serving")
-def export_serving(
-    db: DbOption = Path("data.db"),
-    artifacts: ArtifactsOption = Path("artifacts"),
-    seed: SeedOption = None,
-) -> None:
-    """Ajusta las fuentes sobre toda la historia y escribe artifacts/serving.joblib."""
-
-    _configure_logging(artifacts)
-    config = replace(
-        PipelineConfig(),
-        db_path=db,
-        artifacts_dir=artifacts,
-    )
-    if seed is not None:
-        config = replace(config, random_seed=seed)
-    destination = export_serving_artifact(config)
-    print(f"Artefacto de serving guardado en {destination}")
 
 
 if __name__ == "__main__":

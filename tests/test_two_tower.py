@@ -1,5 +1,3 @@
-"""Two-tower: ejemplos sin futuro, pérdida in-batch y contrato de fit/recommend."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -25,7 +23,12 @@ from quelibroleo.two_tower import (
 
 def _history(n_users: int = 12, n_reads: int = 12) -> pd.DataFrame:
     rows = [
-        (f"u{user}", f"b{(user + offset) % 15}", pd.Timestamp("2020-01-01") + pd.Timedelta(days=offset), 1 + offset % 10)
+        (
+            f"u{user}",
+            f"b{(user + offset) % 15}",
+            pd.Timestamp("2020-01-01") + pd.Timedelta(days=offset),
+            1 + offset % 10,
+        )
         for user in range(n_users)
         for offset in range(n_reads)
     ]
@@ -38,7 +41,9 @@ def _books(history: pd.DataFrame) -> pd.DataFrame:
         {
             "id_libro": items,
             "autor": [f"a{index % 4}" for index in range(len(items))],
-            "genero": ["" if index % 5 == 0 else "novela" for index in range(len(items))],
+            "genero": [
+                "" if index % 5 == 0 else "novela" for index in range(len(items))
+            ],
         }
     )
 
@@ -48,7 +53,9 @@ def test_examples_take_history_before_the_cut_and_target_inside_the_window() -> 
     vocabulary = build_vocabulary(history, _books(history), min_reads=1)
     sequences = build_sequences(history, vocabulary)
 
-    targets, starts, lengths = sample_examples(sequences, window=20, rng=np.random.default_rng(0))
+    targets, starts, lengths = sample_examples(
+        sequences, window=20, rng=np.random.default_rng(0)
+    )
 
     position_in_user = targets - starts
     assert (lengths >= 1).all()
@@ -82,7 +89,9 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     history = _history()
     config = PipelineConfig(
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
-        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1
+        ),
     )
     source = TwoTowerRetriever(config).fit(history, _books(history))
 
@@ -90,7 +99,13 @@ def test_two_stage_source_runs_in_a_child_process_and_skips_seen_books() -> None
     again = source.recommend(["u0", "nuevo"], history, n=5)
 
     seen = set(history.loc[history["id_lector"] == "u0", "id_libro"])
-    assert list(candidates.columns) == ["id_lector", "id_libro", "source", "score", "rank"]
+    assert list(candidates.columns) == [
+        "id_lector",
+        "id_libro",
+        "source",
+        "score",
+        "rank",
+    ]
     assert set(candidates["id_lector"]) == {"u0"}
     assert candidates["rank"].tolist() == [1, 2, 3]
     assert set(candidates["id_libro"]).isdisjoint(seen)
@@ -102,7 +117,9 @@ def test_request_history_moves_the_bag_without_training(monkeypatch) -> None:
     history = _history()
     config = PipelineConfig(
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
-        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1
+        ),
     )
     weights = train_weights(history, _books(history), config)
 
@@ -110,8 +127,12 @@ def test_request_history_moves_the_bag_without_training(monkeypatch) -> None:
         raise AssertionError("puntuar no vuelve a entrenar")
 
     monkeypatch.setattr("quelibroleo.two_tower.fit_history", fail_if_called)
-    stored_users, stored_indices, stored_scores, _item_ids = score_weights(weights, ["u0"], 5)
-    same_users, same_indices, same_scores, _item_ids = score_weights(weights, ["u0"], 5, history)
+    stored_users, stored_indices, stored_scores, _item_ids = score_weights(
+        weights, ["u0"], 5
+    )
+    same_users, same_indices, same_scores, _item_ids = score_weights(
+        weights, ["u0"], 5, history
+    )
     assert same_users == stored_users
     assert same_indices.tolist() == stored_indices.tolist()
     assert np.allclose(same_scores, stored_scores)
@@ -124,7 +145,9 @@ def test_request_history_moves_the_bag_without_training(monkeypatch) -> None:
     newbie = history.loc[history["id_lector"] == "u1"].copy()
     newbie["id_lector"] = "recien"
     extended = pd.concat([history, extra, newbie], ignore_index=True)
-    known, indices, _scores, item_ids = score_weights(weights, ["u0", "recien"], 5, extended)
+    known, indices, _scores, item_ids = score_weights(
+        weights, ["u0", "recien"], 5, extended
+    )
     by_user = {
         user: {str(item_ids[index]) for index in row if index >= 0}
         for user, row in zip(known, indices, strict=True)
@@ -138,7 +161,9 @@ def test_recommend_uses_the_request_history() -> None:
     history = _history()
     config = PipelineConfig(
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
-        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1
+        ),
     )
     source = TwoTowerRetriever(config).fit(history, _books(history))
     first = source.recommend(["u0"], history, n=5)
@@ -160,7 +185,9 @@ def test_scoring_does_not_train_again(monkeypatch) -> None:
     history = _history()
     config = PipelineConfig(
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
-        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=8, batch_size=16, max_epochs=2, patience=1, min_item_reads=1
+        ),
     )
     weights = train_weights(history, _books(history), config)
 
@@ -191,7 +218,9 @@ def test_fit_recommends_unseen_books_and_falls_back_to_popularity(tmp_path) -> N
     config = PipelineConfig(
         artifacts_dir=tmp_path,
         split=SplitConfig(rolling_folds=2, rolling_horizon=2, min_history=2),
-        two_tower=TwoTowerConfig(embedding_dim=8, batch_size=16, max_epochs=3, patience=1, min_item_reads=1),
+        two_tower=TwoTowerConfig(
+            embedding_dim=8, batch_size=16, max_epochs=3, patience=1, min_item_reads=1
+        ),
     )
     model = build_model("two_tower", config)
     model.fit(split)

@@ -1,5 +1,3 @@
-"""CSV de entrega: 20 libros por lector de ``ejemplo.csv``."""
-
 from __future__ import annotations
 
 import pandas as pd
@@ -14,11 +12,6 @@ def fill_submission(
     history: pd.DataFrame,
     popularity: PopularityRecommender,
 ) -> pd.DataFrame:
-    """Completa 20 libros por lector, sin repetir ni recomendar lo ya leído.
-
-    Si el ranking del modelo no alcanza, sigue con popularidad.
-    """
-
     top = ranked[ranked["rank"] <= 20][[USER_COL, ITEM_COL, "rank"]].copy()
     existing = top.groupby(USER_COL)[ITEM_COL].agg(list).to_dict()
     fallback = popularity.recommend(users, history, n=100)

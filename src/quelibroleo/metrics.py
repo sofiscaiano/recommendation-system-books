@@ -1,5 +1,3 @@
-"""Métricas por etapa y diagnósticos del ranking."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,8 +10,6 @@ from .data import ITEM_COL, RATING_COL, USER_COL
 
 
 def _recommendation_order(recommendations: pd.DataFrame) -> pd.DataFrame:
-    """Ordena el ranking por ``rank``, o por ``score`` si no hay rango."""
-
     if "rank" in recommendations:
         return recommendations.sort_values([USER_COL, "rank", ITEM_COL])
     if "score" in recommendations:
@@ -32,17 +28,10 @@ def ndcg_per_user(
     *,
     k: int = 20,
 ) -> pd.Series:
-    """NDCG correcto aun cuando un positivo no fue recuperado.
-
-    Se evalúa la unión entre recomendaciones y verdad. Los positivos ausentes
-    reciben score menor que cualquier recomendación, por lo que penalizan el
-    DCG y siguen formando parte del IDCG.
-    """
-
     ordered = _recommendation_order(recommendations)
-    truth_ratings = (
-        truth.groupby([USER_COL, ITEM_COL], as_index=False)[RATING_COL].max()
-    )
+    truth_ratings = truth.groupby([USER_COL, ITEM_COL], as_index=False)[
+        RATING_COL
+    ].max()
     results: dict[str, float] = {}
 
     for user in sorted(truth_ratings[USER_COL].astype(str).unique()):
@@ -64,8 +53,7 @@ def ndcg_per_user(
             dtype=float,
         )
         score_by_item = {
-            item: float(k - rank + 1)
-            for rank, item in enumerate(rec_items)
+            item: float(k - rank + 1) for rank, item in enumerate(rec_items)
         }
         score_by_item.update({item: 0.0 for item in padding})
         predicted = np.array(
@@ -92,16 +80,12 @@ def ndcg_at_k(
     *,
     k: int = 20,
 ) -> float:
-    """Media simple del NDCG@k entre los usuarios de la verdad."""
-
     values = ndcg_per_user(recommendations, truth, k=k)
     return float(values.mean()) if not values.empty else 0.0
 
 
 @dataclass(frozen=True)
 class RetrievalMetrics:
-    """Cobertura de positivos antes del ranker."""
-
     recall: float
     weighted_recall: float
     oracle_ndcg: float
@@ -109,11 +93,6 @@ class RetrievalMetrics:
 
 
 def retrieval_hits(candidates: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
-    """Una fila por libro de test: ``in_retrieval`` es 1 si entró a candidatos.
-
-    Alcanza para el recall y para el oracle. No guarda el resto del pool.
-    """
-
     truth_rows = truth.groupby([USER_COL, ITEM_COL], as_index=False)[RATING_COL].max()
     truth_rows[USER_COL] = truth_rows[USER_COL].astype(str)
     truth_rows[ITEM_COL] = truth_rows[ITEM_COL].astype(str)
@@ -132,8 +111,6 @@ def retrieval_metrics(
     *,
     k: int = 20,
 ) -> RetrievalMetrics:
-    """Recall de los positivos, recall ponderado por rating y techo de NDCG."""
-
     users = sorted(truth[USER_COL].astype(str).unique())
     candidates_by_user = candidates.groupby(USER_COL)[ITEM_COL].agg(set).to_dict()
     recalls: list[float] = []
@@ -147,9 +124,7 @@ def retrieval_metrics(
         recalls.append(float(hit_mask.mean()) if len(user_truth) else 0.0)
         total_gain = float(user_truth[RATING_COL].sum())
         captured_gain = float(user_truth.loc[hit_mask, RATING_COL].sum())
-        weighted_recalls.append(
-            captured_gain / total_gain if total_gain > 0 else 0.0
-        )
+        weighted_recalls.append(captured_gain / total_gain if total_gain > 0 else 0.0)
         captured = user_truth.loc[hit_mask].sort_values(
             [RATING_COL, ITEM_COL], ascending=[False, True]
         )
@@ -168,9 +143,7 @@ def retrieval_metrics(
     counts = candidates.groupby(USER_COL)[ITEM_COL].nunique()
     return RetrievalMetrics(
         recall=float(np.mean(recalls)) if recalls else 0.0,
-        weighted_recall=float(np.mean(weighted_recalls))
-        if weighted_recalls
-        else 0.0,
+        weighted_recall=float(np.mean(weighted_recalls)) if weighted_recalls else 0.0,
         oracle_ndcg=ndcg_at_k(oracle, truth, k=k),
         mean_candidates=float(counts.reindex(users, fill_value=0).mean())
         if users
@@ -186,12 +159,6 @@ def rows_against_reference(
     recall: float | None = None,
     features: float | None = None,
 ) -> list[dict[str, object]]:
-    """Antepone la referencia y resta sus métricas a cada ablación.
-
-    El delta es ablación menos referencia: negativo significa que sacar esa
-    fuente o esa familia dejó un resultado peor.
-    """
-
     reference: dict[str, object] = {
         "stage": stage,
         "ablation": "full",
@@ -212,5 +179,3 @@ def rows_against_reference(
             item["delta_recall"] = float(row_recall) - recall
         compared.append(item)
     return compared
-
-

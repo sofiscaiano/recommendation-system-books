@@ -1,12 +1,3 @@
-"""Fuentes clásicas como modelos de una etapa, cada una con su study.
-
-`item_cosine`, `als`, `bpr` y `tfidf` se tunean solas, con el NDCG@20 del
-último fold, y dejan su JSON. `two_stage` lee ese archivo para armar la
-fuente y no lo pisa: en la fusión solo elige el peso. El retriever que entra
-a la fusión no rellena con popularidad; el modelo de una etapa sí, igual que
-EASE, para que el top-20 esté completo.
-"""
-
 from __future__ import annotations
 
 import json
@@ -37,16 +28,12 @@ SOURCE_MODEL_NAMES = ("item_cosine", "als", "bpr", "tfidf")
 
 @dataclass(frozen=True)
 class ItemCosineParameters:
-    """Semivida del coseno. El perfil no tiene otros hiperparámetros."""
-
     half_life_days: float
     run_name: str = ""
 
 
 @dataclass(frozen=True)
 class AlsParameters:
-    """Factores, pasos, regularización y semivida de ALS."""
-
     factors: int
     iterations: int
     regularization: float
@@ -56,8 +43,6 @@ class AlsParameters:
 
 @dataclass(frozen=True)
 class BprParameters:
-    """Factores, pasos, learning rate, regularización y semivida de BPR."""
-
     factors: int
     iterations: int
     learning_rate: float
@@ -68,19 +53,25 @@ class BprParameters:
 
 @dataclass(frozen=True)
 class TfidfParameters:
-    """Tope del vocabulario y semivida del perfil de texto."""
-
     max_features: int
     half_life_days: float
     run_name: str = ""
 
 
-SourceParameters = ItemCosineParameters | AlsParameters | BprParameters | TfidfParameters
+SourceParameters = (
+    ItemCosineParameters | AlsParameters | BprParameters | TfidfParameters
+)
 
 _FIELDS: dict[str, tuple[str, ...]] = {
     "item_cosine": ("half_life_days",),
     "als": ("factors", "iterations", "regularization", "half_life_days"),
-    "bpr": ("factors", "iterations", "learning_rate", "regularization", "half_life_days"),
+    "bpr": (
+        "factors",
+        "iterations",
+        "learning_rate",
+        "regularization",
+        "half_life_days",
+    ),
     "tfidf": ("max_features", "half_life_days"),
 }
 _INTEGERS = {
@@ -98,21 +89,15 @@ _CLASSES: dict[str, type[SourceParameters]] = {
 
 
 def source_hyperparameters_path(artifacts_dir: Path, name: str) -> Path:
-    """Ruta del tuneo de una fuente. No es el JSON de two_stage ni el de otra."""
-
     _check_name(name)
     return Path(artifacts_dir) / f"{name}_hyperparameters.json"
 
 
 def has_saved_source_hyperparameters(artifacts_dir: Path, name: str) -> bool:
-    """Indica si hay un tuneo de esta fuente para reutilizar."""
-
     return source_hyperparameters_path(artifacts_dir, name).is_file()
 
 
 def load_source_hyperparameters(path: Path, name: str) -> SourceParameters:
-    """Lee el JSON de una fuente. Falla si el archivo existe pero no es válido."""
-
     _check_name(name)
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -131,8 +116,6 @@ def load_source_hyperparameters(path: Path, name: str) -> SourceParameters:
 
 
 def parameters_from_config(config: PipelineConfig, name: str) -> SourceParameters:
-    """Valores fijos, los de una corrida sin archivo guardado."""
-
     _check_name(name)
     block = getattr(config, name)
     values = {field: getattr(block, field) for field in _FIELDS[name]}
@@ -143,8 +126,6 @@ def resolve_source_parameters(
     config: PipelineConfig,
     name: str,
 ) -> tuple[SourceParameters, str]:
-    """Devuelve el tuneo de la fuente, o los valores fijos si ese archivo no existe."""
-
     path = source_hyperparameters_path(config.artifacts_dir, name)
     if path.is_file():
         return load_source_hyperparameters(path, name), "saved"
@@ -152,32 +133,24 @@ def resolve_source_parameters(
 
 
 def item_cosine_source_parameters(config: PipelineConfig) -> ItemCosineParameters:
-    """Semivida del coseno, como modelo único o como fuente de two_stage."""
-
     parameters, _origin = resolve_source_parameters(config, "item_cosine")
     assert isinstance(parameters, ItemCosineParameters)
     return parameters
 
 
 def als_source_parameters(config: PipelineConfig) -> AlsParameters:
-    """Parámetros de ALS. two_stage no los vuelve a buscar."""
-
     parameters, _origin = resolve_source_parameters(config, "als")
     assert isinstance(parameters, AlsParameters)
     return parameters
 
 
 def bpr_source_parameters(config: PipelineConfig) -> BprParameters:
-    """Parámetros de BPR. No se comparten con ALS."""
-
     parameters, _origin = resolve_source_parameters(config, "bpr")
     assert isinstance(parameters, BprParameters)
     return parameters
 
 
 def tfidf_source_parameters(config: PipelineConfig) -> TfidfParameters:
-    """Tope de términos y semivida de TF-IDF."""
-
     parameters, _origin = resolve_source_parameters(config, "tfidf")
     assert isinstance(parameters, TfidfParameters)
     return parameters
@@ -189,8 +162,6 @@ def tune_source(
     books: pd.DataFrame,
     config: PipelineConfig,
 ) -> SourceParameters:
-    """Elige los hiperparámetros de una fuente maximizando el NDCG@20 del último fold."""
-
     _check_name(name)
     try:
         import optuna
@@ -209,8 +180,6 @@ def tune_source(
     vectorizers: dict[int, TfidfRetriever] = {}
 
     def objective(trial: Any) -> float:
-        """NDCG@20 del último fold. El vectorizer de TF-IDF se reusa si solo cambia la semivida."""
-
         parameters = _from_suggestion(name, search, trial)
         retriever = _fit_for_trial(
             name,
@@ -270,8 +239,6 @@ def fill_with_popularity(
     users: list[str],
     n: int,
 ) -> pd.DataFrame:
-    """Top-n de la fuente y, si no alcanza, popularidad sin repetir."""
-
     columns = [USER_COL, ITEM_COL, "score", "rank"]
     by_user: dict[str, list[tuple[str, float]]] = {}
     if history.empty:
@@ -279,7 +246,9 @@ def fill_with_popularity(
     else:
         seen = {
             str(user): {str(item) for item in items}
-            for user, items in history.groupby(USER_COL, sort=False)[ITEM_COL].agg(set).items()
+            for user, items in history.groupby(USER_COL, sort=False)[ITEM_COL]
+            .agg(set)
+            .items()
         }
     if not ranked.empty:
         for user, group in ranked.groupby(USER_COL, sort=False):
@@ -291,7 +260,6 @@ def fill_with_popularity(
                 group["score"].astype(float).tolist(),
                 strict=True,
             ):
-                # El mínimo de float32 es finito: implicit lo usa para los ya vistos.
                 if (
                     item in already_read
                     or item in taken
@@ -324,15 +292,11 @@ def fill_with_popularity(
             chosen.append((item, float("nan")))
             already.add(item)
         for rank, (item, score) in enumerate(chosen[:n], start=1):
-            rows.append(
-                {USER_COL: user, ITEM_COL: item, "score": score, "rank": rank}
-            )
+            rows.append({USER_COL: user, ITEM_COL: item, "score": score, "rank": rank})
     return pd.DataFrame.from_records(rows, columns=columns)
 
 
 class SourceModel:
-    """Recomendador de una etapa. `fit` y `recommend` no pasan por two_stage."""
-
     def __init__(self, name: str, config: PipelineConfig) -> None:
         _check_name(name)
         self.name = name
@@ -341,13 +305,13 @@ class SourceModel:
         self.hyperparameters_run_name = ""
         self.hyperparameters: dict[str, Any] = {"model": name}
         self._history: pd.DataFrame | None = None
-        self._retriever: ItemCosineRetriever | ImplicitMFRetriever | TfidfRetriever | None = None
+        self._retriever: (
+            ItemCosineRetriever | ImplicitMFRetriever | TfidfRetriever | None
+        ) = None
         self._popularity: PopularityRecommender | None = None
         self._parameters: SourceParameters | None = None
 
     def fit(self, split: SplitData, *, tune: bool = False) -> None:
-        """Ajusta la fuente con `split.history`. El último fold entra si `tune` es verdadero."""
-
         raw = split.history.copy()
         raw[USER_COL] = raw[USER_COL].astype(str)
         raw[ITEM_COL] = raw[ITEM_COL].astype(str)
@@ -359,7 +323,9 @@ class SourceModel:
         else:
             parameters, origin = resolve_source_parameters(self.config, self.name)
             self.hyperparameters_origin = origin
-            self.hyperparameters_run_name = parameters.run_name if origin == "saved" else ""
+            self.hyperparameters_run_name = (
+                parameters.run_name if origin == "saved" else ""
+            )
         history = _in_catalog(raw, split.books)
         catalog = _catalog(history, split.books)
         LOGGER.info("%s entrena con %s", self.name, _public_dict(parameters))
@@ -380,8 +346,6 @@ class SourceModel:
         _log_selected(self.name, parameters, self.hyperparameters_origin)
 
     def recommend(self, users: tuple[str, ...] | list[str]) -> pd.DataFrame:
-        """Top-20, sin libros ya leídos. Popularidad completa si la fuente no llega."""
-
         if self._history is None or self._retriever is None or self._popularity is None:
             raise RuntimeError("El modelo debe entrenarse antes de recomendar")
         user_ids = [str(user) for user in users]
@@ -438,8 +402,6 @@ def _from_suggestion(
     *,
     run_name: str = "",
 ) -> SourceParameters:
-    """Arma los parámetros con lo que Optuna ya eligió, o pidiéndoselo al trial."""
-
     chosen: dict[str, Any] = {}
     stored = getattr(trial, "params", None)
     for field, spec in search_ranges(search).items():
@@ -533,8 +495,6 @@ def _study_population(
     query_users: tuple[str, ...],
     target: pd.DataFrame,
 ) -> tuple[list[str], pd.DataFrame]:
-    """Lectores del objetivo. Con el flag, solo los de ejemplo.csv."""
-
     users = [str(user) for user in query_users]
     if not config.tune_on_example_users:
         return users, target
@@ -545,7 +505,9 @@ def _study_population(
             "Ningún lector de ejemplo.csv entra al último fold; "
             "no se puede tunear solo sobre la entrega."
         )
-    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(drop=True)
+    truth = target.loc[target[USER_COL].astype(str).isin(allowed)].reset_index(
+        drop=True
+    )
     LOGGER.info(
         "El study puntúa el último fold en %s lectores de %s",
         len(present),
@@ -555,8 +517,6 @@ def _study_population(
 
 
 def _in_catalog(frame: pd.DataFrame, books: pd.DataFrame) -> pd.DataFrame:
-    """Deja solo libros del catálogo. El corte temporal no los saca."""
-
     catalog = set(books[ITEM_COL].astype(str))
     kept = frame[frame[ITEM_COL].astype(str).isin(catalog)].copy()
     kept[USER_COL] = kept[USER_COL].astype(str)
@@ -575,14 +535,14 @@ def _write_hyperparameters(
     name: str,
     parameters: SourceParameters,
 ) -> None:
-    """Guarda el study de la fuente sin tocar el JSON de two_stage ni el de otra."""
-
     path = source_hyperparameters_path(config.artifacts_dir, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     from .tracking import with_run_name
 
     path.write_text(
-        json.dumps(with_run_name(_public_dict(parameters)), ensure_ascii=False, indent=2)
+        json.dumps(
+            with_run_name(_public_dict(parameters)), ensure_ascii=False, indent=2
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -590,13 +550,14 @@ def _write_hyperparameters(
 
 
 def _log_selected(name: str, parameters: SourceParameters, origin: str) -> None:
-    """Deja en la corrida activa qué fuente se usó."""
-
     import mlflow
 
     if mlflow.active_run() is None:
         return
-    payload = {f"{name}_selected.{key}": value for key, value in _public_dict(parameters).items()}
+    payload = {
+        f"{name}_selected.{key}": value
+        for key, value in _public_dict(parameters).items()
+    }
     payload[f"{name}_selected.origin"] = origin
     mlflow.log_params(payload)
 
@@ -608,12 +569,6 @@ _TWO_TOWER_INTEGERS = frozenset({"embedding_dim", "min_item_reads"})
 
 @dataclass(frozen=True)
 class TwoTowerParameters:
-    """Lo que elige el study del two-tower. El resto queda en ``TwoTowerConfig``.
-
-    Vive acá, y no en ``two_tower.py``, para que ``two_stage`` arme la fuente
-    sin importar torch en el mismo proceso que LightGBM.
-    """
-
     embedding_dim: int
     learning_rate: float
     temperature: float
@@ -622,20 +577,14 @@ class TwoTowerParameters:
 
 
 def two_tower_hyperparameters_path(artifacts_dir: Path) -> Path:
-    """Ruta del tuneo del two-tower. No es el JSON de two_stage."""
-
     return Path(artifacts_dir) / TWO_TOWER_HYPERPARAMETERS_FILE
 
 
 def has_saved_two_tower_hyperparameters(artifacts_dir: Path) -> bool:
-    """Indica si hay un tuneo del two-tower para reutilizar."""
-
     return two_tower_hyperparameters_path(artifacts_dir).is_file()
 
 
 def load_two_tower_hyperparameters(path: Path) -> TwoTowerParameters:
-    """Lee el JSON del two-tower. Falla si el archivo existe pero no es válido."""
-
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
@@ -660,8 +609,6 @@ def apply_two_tower_parameters(
     config: PipelineConfig,
     parameters: TwoTowerParameters,
 ) -> PipelineConfig:
-    """Devuelve la config con los cuatro valores del study ya puestos."""
-
     block = replace(
         config.two_tower,
         embedding_dim=int(parameters.embedding_dim),
@@ -672,12 +619,9 @@ def apply_two_tower_parameters(
     return replace(config, two_tower=block)
 
 
-def resolved_two_tower_config(config: PipelineConfig) -> tuple[PipelineConfig, str, str]:
-    """Config con el JSON ya aplicado. Sin archivo, devuelve la config tal cual.
-
-    El proceso hijo recibe esta config y no vuelve a abrir el JSON.
-    """
-
+def resolved_two_tower_config(
+    config: PipelineConfig,
+) -> tuple[PipelineConfig, str, str]:
     path = two_tower_hyperparameters_path(config.artifacts_dir)
     if not path.is_file():
         return config, "default", ""
@@ -686,8 +630,6 @@ def resolved_two_tower_config(config: PipelineConfig) -> tuple[PipelineConfig, s
 
 
 def two_tower_resolved_values(config: PipelineConfig) -> dict[str, Any]:
-    """Valores con los que se entrena la torre, sin el rango de búsqueda."""
-
     resolved, _origin, _run_name = resolved_two_tower_config(config)
     values = asdict(resolved.two_tower)
     values.pop("search", None)
@@ -698,8 +640,6 @@ def write_two_tower_hyperparameters(
     config: PipelineConfig,
     parameters: TwoTowerParameters,
 ) -> None:
-    """Guarda el study del two-tower sin tocar el JSON de two_stage."""
-
     path = two_tower_hyperparameters_path(config.artifacts_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     from .tracking import with_run_name

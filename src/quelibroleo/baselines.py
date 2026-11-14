@@ -1,5 +1,3 @@
-"""Baselines no personalizados."""
-
 from __future__ import annotations
 
 import pandas as pd
@@ -8,8 +6,6 @@ from .data import ITEM_COL, USER_COL
 
 
 class PopularityRecommender:
-    """Ranking global por cantidad de interacciones."""
-
     source_name = "popularidad"
 
     def __init__(self) -> None:
@@ -20,8 +16,6 @@ class PopularityRecommender:
         interactions: pd.DataFrame,
         eligible_items: set[str] | None = None,
     ) -> PopularityRecommender:
-        """Ordena el catálogo por cantidad de interacciones en el train."""
-
         counts = (
             interactions.groupby(ITEM_COL, as_index=False)
             .size()
@@ -42,14 +36,10 @@ class PopularityRecommender:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Aplica ese orden a cada lector y salta los libros ya leídos."""
-
         if self.ranking_ is None:
             raise RuntimeError("El recomendador debe entrenarse antes de recomendar")
         if n < 1:
-            return pd.DataFrame(
-                columns=[USER_COL, ITEM_COL, "source", "score", "rank"]
-            )
+            return pd.DataFrame(columns=[USER_COL, ITEM_COL, "source", "score", "rank"])
 
         seen = history.groupby(USER_COL)[ITEM_COL].agg(set).to_dict()
         rows: list[dict[str, object]] = []

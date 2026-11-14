@@ -114,16 +114,14 @@ def test_history_reuses_the_matching_config_not_the_latest(tmp_path) -> None:
     other = replace(base, ranker=replace(base.ranker, label_gain="linear"))
     weights = {name: 1.0 for name in base.retrieval.enabled_sources()}
     ranker = {"learning_rate": 0.05, "num_leaves": 31}
-    record_tuned_hyperparameters(
-        base, rrf_cutoff=100, weights=weights, ranker=ranker
-    )
-    record_tuned_hyperparameters(
-        other, rrf_cutoff=900, weights=weights, ranker=ranker
-    )
+    record_tuned_hyperparameters(base, rrf_cutoff=100, weights=weights, ranker=ranker)
+    record_tuned_hyperparameters(other, rrf_cutoff=900, weights=weights, ranker=ranker)
 
     assert require_tuned_hyperparameters(base).rrf_cutoff == 100
     assert require_tuned_hyperparameters(other).rrf_cutoff == 900
-    assert require_tuned_hyperparameters(replace(base, run_note="otra")).rrf_cutoff == 100
+    assert (
+        require_tuned_hyperparameters(replace(base, run_note="otra")).rrf_cutoff == 100
+    )
     with pytest.raises(ValueError, match="esta config"):
         require_tuned_hyperparameters(replace(base, optuna_trials=80))
     with pytest.raises(ValueError, match="esta config"):
@@ -136,9 +134,7 @@ def test_saved_ease_parameters_change_the_two_stage_config(tmp_path) -> None:
     config = PipelineConfig(artifacts_dir=tmp_path)
     weights = {name: 1.0 for name in config.retrieval.enabled_sources()}
     ranker = {"learning_rate": 0.05, "num_leaves": 31}
-    record_tuned_hyperparameters(
-        config, rrf_cutoff=100, weights=weights, ranker=ranker
-    )
+    record_tuned_hyperparameters(config, rrf_cutoff=100, weights=weights, ranker=ranker)
 
     assert require_tuned_hyperparameters(config).rrf_cutoff == 100
 
@@ -166,9 +162,7 @@ def test_saved_source_parameters_change_the_two_stage_config(tmp_path) -> None:
     config = PipelineConfig(artifacts_dir=tmp_path)
     weights = {name: 1.0 for name in config.retrieval.enabled_sources()}
     ranker = {"learning_rate": 0.05, "num_leaves": 31}
-    record_tuned_hyperparameters(
-        config, rrf_cutoff=100, weights=weights, ranker=ranker
-    )
+    record_tuned_hyperparameters(config, rrf_cutoff=100, weights=weights, ranker=ranker)
 
     (tmp_path / "als_hyperparameters.json").write_text(
         json.dumps(

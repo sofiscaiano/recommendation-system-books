@@ -1,5 +1,3 @@
-"""Fuentes de candidatos y fusión por Reciprocal Rank Fusion."""
-
 from __future__ import annotations
 
 import logging
@@ -32,32 +30,22 @@ CANDIDATE_COLUMNS = [USER_COL, ITEM_COL, "source", "score", "rank"]
 
 
 class Retriever(Protocol):
-    """Contrato mínimo de una fuente de candidatos."""
-
     source_name: str
 
-    def fit(
-        self, interactions: pd.DataFrame, catalog: pd.DataFrame
-    ) -> Retriever:
-        """Ajusta la fuente con el historial y el catálogo de ese corte."""
-        ...
+    def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> Retriever: ...
 
     def recommend(
         self,
         users: list[str] | tuple[str, ...],
         history: pd.DataFrame,
         n: int,
-    ) -> pd.DataFrame:
-        """Ranking de la fuente, con columnas source, score y rank."""
-        ...
+    ) -> pd.DataFrame: ...
 
 
 def _recency_weights(
     frame: pd.DataFrame,
     half_life_days: float,
 ) -> np.ndarray:
-    """Peso exponencial según la edad respecto de la última lectura del lector."""
-
     if half_life_days <= 0:
         return np.ones(len(frame), dtype=np.float32)
     max_dates = frame.groupby(USER_COL)[DATE_COL].transform("max")
@@ -66,8 +54,6 @@ def _recency_weights(
 
 
 def _implicit_confidence(frame: pd.DataFrame, half_life_days: float) -> np.ndarray:
-    """Confianza de ALS y BPR: `(1 + rating / 10)` por recencia."""
-
     return (
         1.0 + frame[RATING_COL].to_numpy(dtype=np.float32) / 10.0
     ) * _recency_weights(frame, half_life_days)
@@ -81,8 +67,6 @@ def _rank_scores(
     n: int,
     seen: set[str],
 ) -> list[dict[str, object]]:
-    """Top-n de un lector, sin vistos, con desempate estable por id_libro."""
-
     if n <= 0 or len(items) == 0:
         return []
     allowed = np.fromiter((item not in seen for item in items), dtype=bool)
@@ -96,9 +80,9 @@ def _rank_scores(
         selected = valid_indices[top_local]
     else:
         selected = valid_indices
-    selected = selected[
-        np.lexsort((items[selected].astype(str), -scores[selected]))
-    ][:take]
+    selected = selected[np.lexsort((items[selected].astype(str), -scores[selected]))][
+        :take
+    ]
     return [
         {
             USER_COL: user,
@@ -112,8 +96,6 @@ def _rank_scores(
 
 
 class ItemCosineRetriever:
-    """Item-item sin materializar la matriz cuadrada de similitud."""
-
     def __init__(self, *, half_life_days: float = 365.0) -> None:
         self.source_name = "item_cosine"
         self.half_life_days = half_life_days
@@ -126,15 +108,13 @@ class ItemCosineRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> ItemCosineRetriever:
-        """Construye la matriz dispersa ítem × usuario, ponderada por rating y recencia."""
-
         eligible = set(catalog[ITEM_COL].astype(str))
         fit_data = interactions[interactions[ITEM_COL].isin(eligible)].copy()
         self.item_ids_ = np.array(sorted(eligible), dtype=object)
-        user_ids = np.array(sorted(fit_data[USER_COL].astype(str).unique()), dtype=object)
-        self.item_index_ = {
-            item: index for index, item in enumerate(self.item_ids_)
-        }
+        user_ids = np.array(
+            sorted(fit_data[USER_COL].astype(str).unique()), dtype=object
+        )
+        self.item_index_ = {item: index for index, item in enumerate(self.item_ids_)}
         user_index = {user: index for index, user in enumerate(user_ids)}
 
         values = (
@@ -160,8 +140,6 @@ class ItemCosineRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Ranking por producto interno entre el perfil del lector y cada ítem."""
-
         if self.item_ids_ is None or self.item_user_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -210,8 +188,6 @@ class ItemCosineRetriever:
 
 
 class ImplicitMFRetriever:
-    """ALS o BPR sobre ocurrencia ponderada por rating y recencia."""
-
     def __init__(
         self,
         algorithm: str = "als",
@@ -243,19 +219,17 @@ class ImplicitMFRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> ImplicitMFRetriever:
-        """Factoriza la matriz usuario × ítem con confianza de rating y recencia."""
-
         try:
             from implicit.als import AlternatingLeastSquares
             from implicit.bpr import BayesianPersonalizedRanking
         except ImportError as exc:
-            raise ImportError(
-                "ImplicitMFRetriever requiere `implicit>=0.7.3`"
-            ) from exc
+            raise ImportError("ImplicitMFRetriever requiere `implicit>=0.7.3`") from exc
 
         eligible = set(catalog[ITEM_COL].astype(str))
         fit_data = interactions[interactions[ITEM_COL].isin(eligible)].copy()
-        user_ids = np.array(sorted(fit_data[USER_COL].astype(str).unique()), dtype=object)
+        user_ids = np.array(
+            sorted(fit_data[USER_COL].astype(str).unique()), dtype=object
+        )
         self.item_ids_ = np.array(sorted(eligible), dtype=object)
         self.user_index_ = {user: index for index, user in enumerate(user_ids)}
         item_index = {item: index for index, item in enumerate(self.item_ids_)}
@@ -298,8 +272,6 @@ class ImplicitMFRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Ranking de ALS o BPR, sin los ítems que el lector ya vio."""
-
         if self.model_ is None or self.user_item_ is None or self.item_ids_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -333,8 +305,6 @@ class ImplicitMFRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Recalcula el factor de un lector que no está en la matriz de entrenamiento."""
-
         if self.algorithm != "als":
             raise RuntimeError("El fold-in en caliente solo está definido para ALS")
         if self.model_ is None or self.item_ids_ is None:
@@ -384,22 +354,20 @@ class ImplicitMFRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """BPR con el historial del pedido, sin reentrenar los factores de libro.
-
-        Si la confianza de cada libro coincide con la del ajuste, devuelve el
-        mismo ranking. Si hay lecturas nuevas o notas distintas, corre el
-        factor guardado hacia esos libros y rankea con los factores de libro
-        congelados.
-        """
-
         if self.algorithm != "bpr":
-            raise RuntimeError("El ajuste con historial nuevo solo está definido para BPR")
+            raise RuntimeError(
+                "El ajuste con historial nuevo solo está definido para BPR"
+            )
         if self.model_ is None or self.item_ids_ is None or self.user_item_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         user_id = str(user_id)
         requested = self._confidence_by_item(user_id, history)
         stored_index = self.user_index_.get(user_id)
-        stored = {} if stored_index is None else _row_confidence(self.user_item_[stored_index])
+        stored = (
+            {}
+            if stored_index is None
+            else _row_confidence(self.user_item_[stored_index])
+        )
         if stored_index is not None and _same_confidence(requested, stored):
             return self.recommend([user_id], history, n)
         if not requested and stored_index is None:
@@ -409,7 +377,9 @@ class ImplicitMFRetriever:
         if stored_index is None:
             user_factor = np.zeros(item_factors.shape[1], dtype=np.float32)
         else:
-            user_factor = np.array(self.model_.user_factors[stored_index], dtype=np.float32, copy=True)
+            user_factor = np.array(
+                self.model_.user_factors[stored_index], dtype=np.float32, copy=True
+            )
         pull = np.zeros(item_factors.shape[1], dtype=np.float32)
         weight = 0.0
         for item_index in set(requested) | set(stored):
@@ -431,9 +401,9 @@ class ImplicitMFRetriever:
         rows = _rank_scores(user_id, self.item_ids_, scores, self.source_name, n, seen)
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
 
-    def _confidence_by_item(self, user_id: str, history: pd.DataFrame) -> dict[int, float]:
-        """Confianza de cada libro de este lector que está en el modelo."""
-
+    def _confidence_by_item(
+        self, user_id: str, history: pd.DataFrame
+    ) -> dict[int, float]:
         if self.item_ids_ is None or history.empty:
             return {}
         item_index = {str(item): index for index, item in enumerate(self.item_ids_)}
@@ -457,8 +427,6 @@ class ImplicitMFRetriever:
 
 
 def _row_confidence(row: sparse.spmatrix) -> dict[int, float]:
-    """Índice de libro a confianza en una fila dispersa."""
-
     return {
         int(index): float(value)
         for index, value in zip(row.indices, row.data, strict=True)
@@ -466,16 +434,12 @@ def _row_confidence(row: sparse.spmatrix) -> dict[int, float]:
 
 
 def _same_confidence(left: dict[int, float], right: dict[int, float]) -> bool:
-    """True si las dos confianzas coinciden libro a libro."""
-
     if left.keys() != right.keys():
         return False
     return all(abs(left[item] - right[item]) <= 1e-4 for item in left)
 
 
 class TfidfRetriever:
-    """Perfil de contenido del lector sobre metadata textual de libros."""
-
     source_name = "tfidf"
 
     def __init__(
@@ -493,8 +457,6 @@ class TfidfRetriever:
 
     @staticmethod
     def _text(catalog: pd.DataFrame) -> pd.Series:
-        """Texto de título, autor, género, editorial y resumen de cada libro."""
-
         fields = ["titulo", "autor", "genero", "editorial", "resumen"]
         available = [field for field in fields if field in catalog]
         text = catalog[available].fillna("").astype(str).agg(" ".join, axis=1)
@@ -506,14 +468,10 @@ class TfidfRetriever:
         interactions: pd.DataFrame,
         catalog: pd.DataFrame,
     ) -> TfidfRetriever:
-        """Vectoriza el catálogo. El historial no entra: el perfil se arma al recomendar."""
-
         del interactions
         fit_catalog = catalog.drop_duplicates(ITEM_COL).sort_values(ITEM_COL)
         self.item_ids_ = fit_catalog[ITEM_COL].astype(str).to_numpy()
-        self.item_index_ = {
-            item: index for index, item in enumerate(self.item_ids_)
-        }
+        self.item_index_ = {item: index for index, item in enumerate(self.item_ids_)}
         vectorizer = TfidfVectorizer(
             lowercase=True,
             strip_accents="unicode",
@@ -538,8 +496,6 @@ class TfidfRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Coseno entre el perfil de texto del lector y cada libro no leído."""
-
         if self.item_matrix_ is None or self.item_ids_ is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         rows: list[dict[str, object]] = []
@@ -555,7 +511,8 @@ class TfidfRetriever:
         if usable.empty:
             return pd.DataFrame(columns=CANDIDATE_COLUMNS)
         weights = (
-            usable[RATING_COL].to_numpy(dtype=np.float32) / 10.0
+            usable[RATING_COL].to_numpy(dtype=np.float32)
+            / 10.0
             * _recency_weights(usable, self.half_life_days)
         )
         history_matrix = sparse.csr_matrix(
@@ -594,22 +551,20 @@ class TfidfRetriever:
         return pd.DataFrame.from_records(rows, columns=CANDIDATE_COLUMNS)
 
 
-def _train_two_tower(history: pd.DataFrame, books: pd.DataFrame, config: PipelineConfig):
-    """Corre en el proceso hijo: ahí sí se importa torch, y se entrena una vez."""
-
+def _train_two_tower(
+    history: pd.DataFrame, books: pd.DataFrame, config: PipelineConfig
+):
     from ..two_tower import train_weights
 
     return train_weights(history, books, config)
 
 
 def _serve_two_tower(weights: object, inbox: Queue, outbox: Queue) -> None:
-    """Proceso hijo: carga la red una vez y puntúa cada pedido con su historial."""
-
     try:
         from ..two_tower import load_tower
 
         tower = load_tower(weights)
-    except Exception as exc:  # noqa: BLE001 - el hijo devuelve cualquier falla de la carga
+    except Exception as exc:  # noqa: BLE001
         outbox.put(("err", RuntimeError(f"{type(exc).__name__}: {exc}")))
         return
     outbox.put(("ready", None))
@@ -620,21 +575,11 @@ def _serve_two_tower(weights: object, inbox: Queue, outbox: Queue) -> None:
         users, history, n = message
         try:
             outbox.put(("ok", tower.score(users, n, history)))
-        except Exception as exc:  # noqa: BLE001 - el hijo devuelve cualquier falla al puntuar
+        except Exception as exc:  # noqa: BLE001
             outbox.put(("err", RuntimeError(f"{type(exc).__name__}: {exc}")))
 
 
 class TwoTowerRetriever:
-    """El two-tower como fuente. Entrena en ``fit`` y puntúa en ``recommend``.
-
-    torch y LightGBM cargan copias distintas de libomp y juntas se caen en
-    macOS (LightGBM #6595). Este proceso nunca importa torch: el entrenamiento
-    y el top-n corren en un proceso hijo. ``recommend`` no vuelve a elegir
-    épocas ni a reentrenar. La bolsa del lector sale del historial recibido,
-    sobre el vocabulario congelado en ``fit``. El hijo queda vivo para no
-    volver a importar torch en cada pedido.
-    """
-
     source_name = "two_tower"
 
     def __init__(self, config: PipelineConfig) -> None:
@@ -645,12 +590,16 @@ class TwoTowerRetriever:
         self._outbox: Queue | None = None
         self._lock = threading.Lock()
 
-    def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> TwoTowerRetriever:
+    def fit(
+        self, interactions: pd.DataFrame, catalog: pd.DataFrame
+    ) -> TwoTowerRetriever:
         from concurrent.futures import ProcessPoolExecutor
         from multiprocessing import get_context
 
         self._stop_worker()
-        with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as pool:
+        with ProcessPoolExecutor(
+            max_workers=1, mp_context=get_context("spawn")
+        ) as pool:
             self._weights = pool.submit(
                 _train_two_tower, interactions, catalog, self.config
             ).result()
@@ -661,8 +610,6 @@ class TwoTowerRetriever:
         return self
 
     def warm(self) -> None:
-        """Arranca el hijo y carga la red. El primer pedido no paga ese costo."""
-
         if self._weights is None:
             return
         with self._lock:
@@ -695,8 +642,6 @@ class TwoTowerRetriever:
         )
 
     def _ask(self, users: list[str], history: pd.DataFrame, n: int) -> tuple:
-        """Manda un pedido al hijo y espera el top-n."""
-
         with self._lock:
             self._ensure_worker()
             assert self._inbox is not None
@@ -712,8 +657,6 @@ class TwoTowerRetriever:
         return payload
 
     def _ensure_worker(self) -> None:
-        """Deja un hijo con la red cargada. Hay que llamarlo con el lock tomado."""
-
         if self._process is not None and self._process.is_alive():
             return
         from multiprocessing import get_context
@@ -730,14 +673,14 @@ class TwoTowerRetriever:
             status, payload = self._outbox.get(timeout=180)
         except Exception as exc:
             self._stop_worker()
-            raise RuntimeError("El proceso del two-tower no llegó a cargar la red") from exc
+            raise RuntimeError(
+                "El proceso del two-tower no llegó a cargar la red"
+            ) from exc
         if status != "ready":
             self._stop_worker()
             raise payload
 
     def _stop_worker(self) -> None:
-        """Cierra el hijo. El artefacto no guarda el proceso."""
-
         process = self._process
         inbox = self._inbox
         self._process = None
@@ -778,14 +721,6 @@ class TwoTowerRetriever:
 
 
 class EaseRetriever:
-    """EASE como fuente. La matriz se ajusta en este proceso.
-
-    λ y el mínimo de lecturas no los elige el study de two_stage: salen del
-    JSON de EASE o de `EaseConfig`. La matriz es el rating; al puntuar se
-    multiplica por la recencia. No rellena con popularidad. Un lector sin
-    peso en los libros del modelo no aporta filas.
-    """
-
     source_name = "ease"
 
     def __init__(self, parameters: EaseParameters, *, half_life_days: float) -> None:
@@ -794,10 +729,10 @@ class EaseRetriever:
         self._spectrum: EaseSpectrum | None = None
 
     def fit(self, interactions: pd.DataFrame, catalog: pd.DataFrame) -> EaseRetriever:
-        """Diagonaliza XᵀX con los libros del catálogo que pasan el mínimo."""
-
         eligible = set(catalog[ITEM_COL].astype(str))
-        fit_data = interactions.loc[interactions[ITEM_COL].astype(str).isin(eligible)].copy()
+        fit_data = interactions.loc[
+            interactions[ITEM_COL].astype(str).isin(eligible)
+        ].copy()
         fit_data[USER_COL] = fit_data[USER_COL].astype(str)
         fit_data[ITEM_COL] = fit_data[ITEM_COL].astype(str)
         matrix, item_ids = interaction_matrix(
@@ -819,8 +754,6 @@ class EaseRetriever:
         history: pd.DataFrame,
         n: int,
     ) -> pd.DataFrame:
-        """Top-n de la matriz ya ajustada, sin los libros que el lector ya vio."""
-
         if self._spectrum is None:
             raise RuntimeError("El retriever debe entrenarse antes de recomendar")
         ranked = ease_ranking(
@@ -850,26 +783,19 @@ def build_default_retrievers(
     two_tower: PipelineConfig | None = None,
     ease: EaseParameters | None = None,
 ) -> list[Retriever]:
-    """Fuentes activas. Sin `enabled`, entrena las cinco clásicas y, si se pasan, two-tower y EASE.
-
-    Sin un objeto de parámetros, cada fuente usa los defaults de hoy y la
-    semivida de `half_life_days`. EASE puntúa con esa misma semivida. Un
-    objeto pisa solo a su fuente: ALS y BPR no comparten factores.
-    """
-
     wanted = None if enabled is None else set(enabled)
     known = {"popularidad", "item_cosine", "als", "bpr", "tfidf", "two_tower", "ease"}
     if wanted is not None:
         unknown = sorted(wanted - known)
         if unknown:
-            raise ValueError(
-                "Fuentes de retrieval desconocidas: " + ", ".join(unknown)
-            )
+            raise ValueError("Fuentes de retrieval desconocidas: " + ", ".join(unknown))
 
     def include(name: str) -> bool:
         return wanted is None or name in wanted
 
-    cosine_half_life = half_life_days if item_cosine is None else item_cosine.half_life_days
+    cosine_half_life = (
+        half_life_days if item_cosine is None else item_cosine.half_life_days
+    )
     als_factors = 64 if als is None else als.factors
     als_iterations = 20 if als is None else als.iterations
     als_regularization = 0.01 if als is None else als.regularization
@@ -927,8 +853,6 @@ def build_default_retrievers(
 
 
 def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
-    """Instancia las fuentes activas con el JSON de cada una, o con su config."""
-
     from ..source_models import (
         als_source_parameters,
         bpr_source_parameters,
@@ -945,7 +869,9 @@ def retrievers_from_config(config: PipelineConfig) -> list[Retriever]:
         random_state=config.random_seed,
         half_life_days=retrieval.recency_half_life_days,
         item_cosine=(
-            item_cosine_source_parameters(config) if retrieval.item_cosine_source else None
+            item_cosine_source_parameters(config)
+            if retrieval.item_cosine_source
+            else None
         ),
         als=als_source_parameters(config) if retrieval.als_source else None,
         bpr=bpr_source_parameters(config) if retrieval.bpr_source else None,
@@ -961,8 +887,6 @@ def fit_retrievers(
     interactions: pd.DataFrame,
     catalog: pd.DataFrame,
 ) -> list[Retriever]:
-    """Entrena todas las fuentes."""
-
     for retriever in retrievers:
         if isinstance(retriever, PopularityRecommender):
             retriever.fit(interactions, set(catalog[ITEM_COL]))
@@ -977,11 +901,8 @@ def retrieve_all(
     history: pd.DataFrame,
     per_source: int,
 ) -> pd.DataFrame:
-    """Concatena rankings largos de todas las fuentes."""
-
     frames = [
-        retriever.recommend(users, history, per_source)
-        for retriever in retrievers
+        retriever.recommend(users, history, per_source) for retriever in retrievers
     ]
     non_empty = [frame for frame in frames if not frame.empty]
     if not non_empty:
@@ -993,14 +914,6 @@ def retrieve_all(
 
 
 def per_source_depth(cutoff: int, *, rrf_k: float, n_sources: int) -> int:
-    """Profundidad de cada lista para no alterar el top fusionado.
-
-    Con pesos parejos, los `cutoff` primeros de una fuente superan a un libro
-    que todas las fuentes recién rankean después de esta profundidad. Más atrás
-    el tail no entra al corte del ranking mergeado. El catálogo completo no
-    hace falta.
-    """
-
     if cutoff < 1:
         raise ValueError("cutoff debe ser positivo")
     if rrf_k <= 0:
@@ -1012,12 +925,6 @@ def per_source_depth(cutoff: int, *, rrf_k: float, n_sources: int) -> int:
 
 
 def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
-    """Deja pesos relativos que suman 1.
-
-    El orden de RRF no cambia si se escalan todos los pesos: solo importan
-    las proporciones. Un peso nulo apaga esa fuente.
-    """
-
     if not weights:
         raise ValueError("Se requiere al menos un peso")
     cleaned: dict[str, float] = {}
@@ -1034,15 +941,11 @@ def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
 
 @dataclass(frozen=True)
 class FusionResult:
-    """Candidatos fusionados y rankings fuente conservados."""
-
     candidates: pd.DataFrame
     source_candidates: pd.DataFrame
 
 
 class CandidateFusion:
-    """RRF ponderado truncado por un corte del ranking fusionado."""
-
     def __init__(
         self,
         *,
@@ -1055,8 +958,6 @@ class CandidateFusion:
         self.rrf_k = rrf_k
 
     def fuse(self, candidates: pd.DataFrame, cutoff: int) -> FusionResult:
-        """Suma 1/(k+rank) por fuente y se queda con el prefijo del ranking fusionado."""
-
         if cutoff < 1:
             raise ValueError("cutoff debe ser positivo")
         empty = pd.DataFrame(
